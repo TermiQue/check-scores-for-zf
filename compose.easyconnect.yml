@@ -1,0 +1,63 @@
+services:
+  easyconnect:
+    image: hagb/docker-easyconnect@sha256:40c411e71198111871ac281cee78ff0ae961139897674c7df8fa5eec0da78e80
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    environment:
+      PASSWORD: "${EC_VNC_PASSWORD:-zfcheck}"
+      USE_NOVNC: "1"
+      URLWIN: "1"
+      DISABLE_PKG_VERSION_XML: "1"
+      IPTABLES_LEGACY: "1"
+      PING_ADDR_URL: "http://jwxt.cumt.edu.cn/jwglxt/xtgl/login_slogin.html"
+      PING_INTERVAL: "300"
+      VNC_SIZE: "1110x700"
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:18080:8080"
+    volumes:
+      - ./easyconnect-data:/root
+    shm_size: 256m
+    restart: "no"
+
+  checker:
+    build:
+      context: .
+    image: zf-check-scores:windows
+    depends_on:
+      - easyconnect
+    network_mode: "service:easyconnect"
+    environment:
+      ZF_URL: "${ZF_URL:-http://jwxt.cumt.edu.cn/jwglxt/}"
+      ZF_PROXY: ""
+      ZF_CAPTCHA_PASSWORD_MODE: "${ZF_CAPTCHA_PASSWORD_MODE:-plain}"
+      ZF_USERNAME_FILE: /run/secrets/zf_username
+      ZF_PASSWORD_FILE: /run/secrets/zf_password
+      PUSH_TOKEN_FILE: /run/secrets/push_token
+      PUSH_PROVIDER: "${PUSH_PROVIDER:-showdoc}"
+      CHECK_INTERVAL_SECONDS: "${CHECK_INTERVAL_SECONDS:-1800}"
+      HEARTBEAT_INTERVAL_SECONDS: "${HEARTBEAT_INTERVAL_SECONDS:-300}"
+      CHECK_JITTER_SECONDS: "${CHECK_JITTER_SECONDS:-120}"
+      FAILURE_ALERT_COOLDOWN_SECONDS: "${FAILURE_ALERT_COOLDOWN_SECONDS:-21600}"
+      REQUEST_TIMEOUT_SECONDS: "${REQUEST_TIMEOUT_SECONDS:-20}"
+      TZ: Asia/Shanghai
+    secrets:
+      - zf_username
+      - zf_password
+      - push_token
+    volumes:
+      - ./runtime-data:/data
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp
+
+secrets:
+  zf_username:
+    file: ./secrets/zf_username.txt
+  zf_password:
+    file: ./secrets/zf_password.txt
+  push_token:
+    file: ./secrets/push_token.txt

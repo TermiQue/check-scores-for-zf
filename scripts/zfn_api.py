@@ -1,6 +1,9 @@
 import base64
 import binascii
+import hashlib
 import json
+import logging
+import os
 import re
 import time
 import traceback
@@ -10,6 +13,9 @@ import requests
 import rsa
 from pyquery import PyQuery as pq
 from requests import exceptions
+
+
+LOGGER = logging.getLogger(__name__)
 
 RASPIANIE = [
     ["8:00", "8:40"],
@@ -44,6 +50,7 @@ class Client:
 
         self.key_url = urljoin(self.base_url, "xtgl/login_getPublicKey.html")
         self.login_url = urljoin(self.base_url, "xtgl/login_slogin.html")
+        self.logout_url = urljoin(self.base_url, "xtgl/login_logoutAccount.html")
         self.kaptcha_url = urljoin(self.base_url, "kaptcha")
         self.headers = requests.utils.default_headers()
         self.headers["Referer"] = self.login_url
@@ -53,20 +60,117 @@ class Client:
         self.sess.keep_alive = False
         self.cookies = cookies
 
+    def _login_debug_enabled(self):
+        return os.getenv("ZF_LOGIN_DEBUG", "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
+    def _cookie_debug_summary(self):
+        return [
+            {
+                "name": cookie.name,
+                "domain": cookie.domain,
+                "path": cookie.path,
+                "secure": cookie.secure,
+                "fingerprint": hashlib.sha256(cookie.value.encode()).hexdigest()[:10],
+            }
+            for cookie in self.sess.cookies
+        ]
+
+    def _debug_response(self, stage, response):
+        if not self._login_debug_enabled():
+            return
+        response_cookies = [
+            {
+                "name": cookie.name,
+                "domain": cookie.domain,
+                "path": cookie.path,
+                "fingerprint": hashlib.sha256(cookie.value.encode()).hexdigest()[:10],
+            }
+            for cookie in response.cookies
+        ]
+        history = []
+        for item in response.history:
+            history.append(
+                {
+                    "status": item.status_code,
+                    "url": item.url,
+                    "location": item.headers.get("Location"),
+                    "cookies": [
+                        {
+                            "name": cookie.name,
+                            "domain": cookie.domain,
+                            "path": cookie.path,
+                            "fingerprint": hashlib.sha256(
+                                cookie.value.encode()
+                            ).hexdigest()[:10],
+                        }
+                        for cookie in item.cookies
+                    ],
+                }
+            )
+        LOGGER.info(
+            "LOGIN_DEBUG http | stage=%s status=%s url=%s history=%s "
+            "content_type=%s body_bytes=%s body_sha256=%s response_cookies=%s "
+            "session_cookies=%s",
+            stage,
+            response.status_code,
+            response.url,
+            history,
+            response.headers.get("Content-Type"),
+            len(response.content),
+            hashlib.sha256(response.content).hexdigest()[:16],
+            response_cookies,
+            self._cookie_debug_summary(),
+        )
+
     def login(self, sid, password):
         """登录教务系统"""
         need_verify = False
         try:
             # 登录页
             req_csrf = self.sess.get(self.login_url, headers=self.headers, timeout=self.timeout)
+            self._debug_response("login_page", req_csrf)
             if req_csrf.status_code != 200:
                 return {"code": 2333, "msg": "教务系统挂了"}
             # 获取csrf_token
             doc = pq(req_csrf.text)
             csrf_token = doc("#csrftoken").attr("value")
-            pre_cookies = self.sess.cookies.get_dict()
+            form_data = {}
+            for item in doc("input[name]").items():
+                name = item.attr("name")
+                if name not in {"yhm", "mm", "yzm"}:
+                    form_data[name] = item.attr("value") or ""
+            if self._login_debug_enabled():
+                LOGGER.info(
+                    "LOGIN_DEBUG form | action=%r captcha_input=%s captcha_src=%r "
+                    "csrf_present=%s csrf_fingerprint=%s inputs=%s",
+                    doc("form").attr("action"),
+                    bool(doc("input#yzm")),
+                    doc("img#kaptcha").attr("src") or doc("#yzmPic").attr("src"),
+                    bool(csrf_token),
+                    hashlib.sha256((csrf_token or "").encode()).hexdigest()[:10],
+                    [
+                        {
+                            "name": item.attr("name"),
+                            "id": item.attr("id"),
+                            "type": item.attr("type"),
+                        }
+                        for item in doc("input").items()
+                    ],
+                )
             # 获取publicKey并加密密码
-            req_pubkey = self.sess.get(self.key_url, headers=self.headers, timeout=self.timeout).json()
+            req_pubkey_response = self.sess.get(
+                self.key_url,
+                headers=self.headers,
+                params={"time": int(time.time() * 1000)},
+                timeout=self.timeout,
+            )
+            self._debug_response("public_key", req_pubkey_response)
+            req_pubkey = req_pubkey_response.json()
             modulus = req_pubkey["modulus"]
             exponent = req_pubkey["exponent"]
             if str(doc("input#yzm")) == "":
@@ -118,18 +222,28 @@ class Client:
                 }
             # 需要验证码，返回相关页面验证信息给用户，TODO: 增加更多验证方式
             need_verify = True
-            req_kaptcha = self.sess.get(self.kaptcha_url, headers=self.headers, timeout=self.timeout)
+            req_kaptcha = self.sess.get(
+                self.kaptcha_url,
+                headers=self.headers,
+                params={"time": int(time.time() * 1000)},
+                timeout=self.timeout,
+            )
+            self._debug_response("captcha_image", req_kaptcha)
             kaptcha_pic = base64.b64encode(req_kaptcha.content).decode()
+            # 部分正方实例会在登录页、公钥和验证码请求之间轮换
+            # JSESSIONID。验证码必须与获取图片后的最新会话一起提交。
+            kaptcha_cookies = self.sess.cookies.get_dict()
             return {
                 "code": 1001,
                 "msg": "获取验证码成功",
                 "data": {
                     "sid": sid,
                     "csrf_token": csrf_token,
-                    "cookies": pre_cookies,
+                    "cookies": kaptcha_cookies,
                     "password": password,
                     "modulus": modulus,
                     "exponent": exponent,
+                    "form_data": form_data,
                     "kaptcha_pic": kaptcha_pic,
                     "timestamp": time.time(),
                 },
@@ -152,48 +266,114 @@ class Client:
             msg = "获取验证码时未记录的错误" if need_verify else "登录时未记录的错误"
             return {"code": 999, "msg": f"{msg}：{str(e)}"}
 
-    def login_with_kaptcha(self, sid, csrf_token, cookies, password, modulus, exponent, kaptcha, **kwargs):
+    def login_with_kaptcha(
+        self,
+        sid,
+        csrf_token,
+        cookies,
+        password,
+        modulus,
+        exponent,
+        kaptcha,
+        use_encryption=True,
+        form_data=None,
+        **kwargs,
+    ):
         """需要验证码的登陆"""
         try:
-            encrypt_password = self.encrypt_password(password, modulus, exponent)
-            login_data = {
-                "csrftoken": csrf_token,
-                "yhm": sid,
-                "mm": encrypt_password,
-                "yzm": kaptcha,
-            }
+            submitted_password = (
+                self.encrypt_password(password, modulus, exponent)
+                if use_encryption
+                else password
+            )
+            # 页面中 hidMm 和 mm 是两个同名输入框。浏览器会按 DOM 顺序
+            # 提交两次 mm；使用 dict 会合并成一个字段，并被部分正方实例
+            # 无提示地 302 回登录页。
+            defaults = dict(form_data or {})
+            defaults["csrftoken"] = csrf_token
+            login_data = list(defaults.items())
+            login_data.extend(
+                [
+                    ("yhm", sid),
+                    ("mm", submitted_password),
+                    ("mm", submitted_password),
+                    ("yzm", kaptcha),
+                ]
+            )
+            # 验证码必须在获取图片的同一个 Session 中提交。不要把 get_dict()
+            # 结果 update 回 CookieJar，否则会额外创建一个无域名的同名
+            # JSESSIONID，并在请求头中发送两个会话 Cookie。
+            if self._login_debug_enabled():
+                prepared = self.sess.prepare_request(
+                    requests.Request(
+                        "POST",
+                        self.login_url,
+                        params={"time": int(time.time() * 1000)},
+                        headers=self.headers,
+                        data=login_data,
+                    )
+                )
+                cookie_header = prepared.headers.get("Cookie", "")
+                LOGGER.info(
+                    "LOGIN_DEBUG submit | fields=%s captcha_length=%s "
+                    "captcha_alnum=%s password_mode=%s cookie_names=%s "
+                    "session_cookies=%s",
+                    [name for name, _ in login_data],
+                    len(kaptcha),
+                    kaptcha.isalnum(),
+                    "encrypted" if use_encryption else "plain",
+                    [
+                        part.split("=", 1)[0].strip()
+                        for part in cookie_header.split(";")
+                        if "=" in part
+                    ],
+                    self._cookie_debug_summary(),
+                )
+
             req_login = self.sess.post(
                 self.login_url,
                 headers=self.headers,
-                cookies=cookies,
+                params={"time": int(time.time() * 1000)},
                 data=login_data,
                 timeout=self.timeout,
             )
+            self._debug_response("captcha_submit", req_login)
             if req_login.status_code != 200:
                 return {"code": 2333, "msg": "教务系统挂了"}
             # 请求登录
             doc = pq(req_login.text)
             tips = doc("p#tips")
-            if str(tips) != "":
-                if "验证码" in tips.text():
+            if self._login_debug_enabled():
+                LOGGER.info(
+                    "LOGIN_DEBUG result | tips=%r title=%r h5=%r "
+                    "captcha_input=%s form_action=%r",
+                    tips.text(),
+                    doc("title").text(),
+                    doc("h5").text(),
+                    bool(doc("input#yzm")),
+                    doc("form").attr("action"),
+                )
+            tip_text = (tips.text() or "").strip()
+            if tip_text:
+                if "验证码" in tip_text:
                     return {"code": 1004, "msg": "验证码输入错误"}
-                if "用户名或密码" in tips.text():
+                if "用户名或密码" in tip_text:
                     return {"code": 1002, "msg": "用户名或密码不正确"}
-                return {"code": 998, "msg": tips.text()}
+                return {"code": 998, "msg": tip_text}
+            if doc("h5").text() == "用户登录" or bool(doc("input#yhm")):
+                return {
+                    "code": 998,
+                    "msg": "登录提交后被重定向回登录页，服务端未提供错误提示",
+                }
             self.cookies = self.sess.cookies.get_dict()
             # 不同学校系统兼容差异
-            if not self.cookies.get("route"):
-                route_cookies = {
-                    "JSESSIONID": self.cookies["JSESSIONID"],
-                    "route": cookies["route"],
-                }
-                self.cookies = route_cookies
-            else:
-                return {
-                    "code": 1000,
-                    "msg": "登录成功",
-                    "data": {"cookies": self.cookies},
-                }
+            if not self.cookies.get("route") and cookies.get("route"):
+                self.cookies["route"] = cookies["route"]
+            return {
+                "code": 1000,
+                "msg": "登录成功",
+                "data": {"cookies": self.cookies},
+            }
         except exceptions.Timeout:
             return {"code": 1003, "msg": "登录超时"}
         except (

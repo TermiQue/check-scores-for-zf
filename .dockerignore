@@ -1,0 +1,9 @@
+.git
+.github
+.env
+.env.poc
+secrets
+runtime-data
+tests
+__pycache__
+*.pyc

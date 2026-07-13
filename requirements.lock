@@ -1,0 +1,10 @@
+certifi==2026.6.17
+charset-normalizer==3.4.9
+cssselect==1.4.0
+idna==3.18
+lxml==6.1.1
+pyasn1==0.6.4
+pyquery==2.0.1
+requests==2.34.2
+rsa==4.9.1
+urllib3==2.7.0

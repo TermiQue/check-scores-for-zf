@@ -1,1 +1,8 @@
 __pycache__/
+.env
+.env.poc
+secrets/
+runtime-data/
+easyconnect-data/
+.pytest_cache/
+*.pyc
