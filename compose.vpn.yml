@@ -1,0 +1,8 @@
+services:
+  checker:
+    depends_on:
+      easyconnect:
+        condition: service_started
+    network_mode: "service:easyconnect"
+    environment:
+      ZF_NETWORK_MODE: "vpn"

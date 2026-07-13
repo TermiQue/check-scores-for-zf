@@ -1,0 +1,5 @@
+services:
+  checker:
+    network_mode: host
+    environment:
+      ZF_NETWORK_MODE: "direct"

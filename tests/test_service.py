@@ -294,6 +294,20 @@ class FailureNotificationTests(unittest.TestCase):
             self.assertIn("正方教务不可用", title)
             self.assertIn("自动重试", content)
 
+    @patch("zfcheck.service.vpn_tunnel_connected", return_value=False)
+    def test_direct_mode_does_not_report_a_vpn_failure(self, _mock_tunnel):
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            "os.environ", {"ZF_NETWORK_MODE": "direct"}
+        ):
+            checker = self._checker(temp_dir)
+            try:
+                checker._notify_failure("获取成绩失败（2333）：连接超时")
+            finally:
+                checker.store.close()
+            title, content = checker.notifier.messages[0]
+            self.assertIn("正方教务不可用", title)
+            self.assertNotIn("VPN 已断开", title)
+
 
 class SessionPersistenceTests(unittest.TestCase):
     def test_saved_cookies_are_loaded_by_a_new_checker(self):

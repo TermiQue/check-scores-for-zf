@@ -246,7 +246,10 @@ class ScoreChecker:
                 "恢复方法：在 Windows 项目目录双击 windows-start.cmd，"
                 "按提示完成验证码，服务会自动恢复。"
             )
-        elif not vpn_tunnel_connected():
+        elif (
+            os.getenv("ZF_NETWORK_MODE", "vpn").strip().lower() == "vpn"
+            and not vpn_tunnel_connected()
+        ):
             kind = "vpn"
             title = "成绩检查暂停：VPN 已断开"
             summary = "未检测到 EasyConnect 的 tun0 隧道或 VPN 路由。"
