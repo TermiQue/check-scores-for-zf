@@ -17,6 +17,22 @@ FAILURE_ALERT_COOLDOWN_SECONDS=21600
 REQUEST_TIMEOUT_SECONDS=20
 ```
 
+## Docker 构建与镜像源
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `PYTHON_BASE_IMAGE` | 固定摘要的 `python:3.12-slim` | 可选的 Python 基础镜像地址；通常无需设置 |
+
+启动器默认使用 Docker Hub 官方 Python 镜像并自动尝试 3 次。如果错误明确来自基础镜像的网络请求，则自动切换到 DaoCloud 公共镜像加速，再尝试 2 次。官方源和备用源都固定为同一个 SHA-256 摘要，因此切换仓库地址不会改变基础镜像内容。
+
+如果所在网络有自己的可信镜像仓库，可以在 `.env` 中设置：
+
+```dotenv
+PYTHON_BASE_IMAGE=你的镜像仓库/library/python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf
+```
+
+自定义源会优先尝试；网络失败时仍会依次回退到 Docker Hub 和 DaoCloud。依赖安装、代码错误或其他非基础镜像下载问题不会触发重复构建。
+
 ## 教务与验证码
 
 | 变量 | 默认值 | 说明 |

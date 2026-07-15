@@ -46,12 +46,12 @@ if (-not (Test-Path $EnvFile)) {
 
 Write-Host "账号配置已安全写入本地 secrets 目录（不会提交到 Git）。"
 Write-RunningStatus "正在准备成绩查询运行环境"
-$buildResult = Invoke-DockerWithProgress `
-    -Arguments @("compose", "-f", (Join-Path $Root "compose.easyconnect.yml"), "build", "checker") `
-    -Activity "正在初始化正方成绩检查服务" -Status "构建成绩查询镜像" `
+$buildResult = Invoke-CheckerBuildWithFallback `
+    -ComposeFile (Join-Path $Root "compose.easyconnect.yml") `
+    -Activity "正在初始化正方成绩检查服务" `
     -StartPercent 20 -EndPercent 95 -WorkingDirectory $Root
 if ($buildResult.ExitCode -ne 0) {
-    throw "Docker 镜像构建失败。"
+    throw "Docker 镜像构建失败；Python 官方源和备用源均无法使用，或构建过程存在其他错误。"
 }
 
 Write-SuccessStatus "初始化完成，启动程序将继续后续步骤"

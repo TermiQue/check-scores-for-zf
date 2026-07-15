@@ -584,9 +584,13 @@ function Invoke-StartAction {
     }
     else {
         Show-StartupProgress 18 "构建并检查成绩查询镜像"
-        Invoke-DockerCommand -Arguments @("compose", "-f", $ComposeFile, "build", "checker") `
-            -Status "构建成绩查询镜像" -StartPercent 18 -EndPercent 30
-        if ($script:LastDockerExitCode -ne 0) { throw "成绩检查镜像构建失败。" }
+        $buildResult = Invoke-CheckerBuildWithFallback `
+            -ComposeFile $ComposeFile -WorkingDirectory $Root `
+            -Activity "正在启动正方成绩检查服务" `
+            -StartPercent 18 -EndPercent 30
+        if ($buildResult.ExitCode -ne 0) {
+            throw "成绩检查镜像构建失败；已完成自动重试和备用源切换。"
+        }
     }
     Show-StartupProgress 30 "本地配置与成绩查询镜像准备完成"
 

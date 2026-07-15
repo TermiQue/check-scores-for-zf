@@ -49,6 +49,18 @@ class WindowsLauncherContractTests(unittest.TestCase):
             content,
         )
 
+    def test_python_image_build_has_retry_and_mirror_fallback(self):
+        ui = (ROOT / "windows-ui.ps1").read_text(encoding="utf-8-sig")
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        compose = (ROOT / "compose.easyconnect.yml").read_text(encoding="utf-8")
+
+        self.assertIn("function Invoke-CheckerBuildWithFallback", ui)
+        self.assertIn("Test-PythonBaseImageNetworkFailure", ui)
+        self.assertIn("m.daocloud.io/docker.io/library/python", ui)
+        self.assertIn("ARG PYTHON_BASE_IMAGE=", dockerfile)
+        self.assertIn("FROM ${PYTHON_BASE_IMAGE}", dockerfile)
+        self.assertIn("PYTHON_BASE_IMAGE:", compose)
+
 
 if __name__ == "__main__":
     unittest.main()

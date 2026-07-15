@@ -76,7 +76,7 @@ cd check-scores-for-zf
 2. 正方教务密码；
 3. ShowDoc Push 完整地址或 Token。
 
-启动器会自动构建镜像并检测网络。任务执行时显示红色旋转状态或动态进度条，完成后原地切换成绿色“成功”。
+启动器会自动构建镜像并检测网络。任务执行时显示红色旋转状态或动态进度条，完成后原地切换成绿色“成功”。如果 Docker Hub 的 Python 基础镜像下载失败，启动器会自动重试；连续失败后切换到固定相同镜像摘要的 DaoCloud 备用源，无需手动修改 Dockerfile。
 
 <p align="center">
   <img src="docs/images/01-launcher-main-menu.png" alt="启动器主菜单，选择启动或恢复服务" width="900">

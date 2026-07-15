@@ -407,7 +407,9 @@ REQUEST_TIMEOUT_SECONDS=20
 
 ### 无法下载镜像
 
-包含 `failed to resolve reference` 或 `Docker Desktop has no HTTPS proxy` 的错误属于 Docker Hub 网络问题。配置 Docker Desktop 代理或更换可访问 Docker Hub 的网络后重试。
+获取 Python 基础镜像时，启动器会先自动重试 Docker Hub；连续失败后切换到固定相同 SHA-256 摘要的 DaoCloud 备用源。如果两个来源都不可达，仍建议检查 Docker Desktop 代理、DNS 或更换网络。包含 `Docker Desktop has no HTTPS proxy` 的错误说明 Docker Desktop 本身没有使用宿主机代理。
+
+需要使用自己的镜像仓库时，在 `.env` 中设置 `PYTHON_BASE_IMAGE`，具体格式参见[配置参考](docs/CONFIGURATION.md#docker-构建与镜像源)。该设置只影响 checker 的 Python 基础镜像，不会改变 EasyConnect 镜像来源。
 
 ### VPN 页面已经连接，但正方仍不可达
 

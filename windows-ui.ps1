@@ -355,3 +355,111 @@ function Invoke-DockerWithProgress {
         Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
     }
 }
+
+function Get-LocalBuildSetting {
+    param(
+        [string]$WorkingDirectory,
+        [string]$Name
+    )
+
+    $processValue = [Environment]::GetEnvironmentVariable($Name, "Process")
+    if (-not [string]::IsNullOrWhiteSpace($processValue)) {
+        return $processValue.Trim().Trim('"', "'")
+    }
+    $envFile = Join-Path $WorkingDirectory ".env"
+    if (Test-Path -LiteralPath $envFile) {
+        foreach ($line in Get-Content -LiteralPath $envFile -Encoding UTF8) {
+            if ($line -match "^\s*$([regex]::Escape($Name))\s*=\s*(.*?)\s*$") {
+                return $Matches[1].Trim().Trim('"', "'")
+            }
+        }
+    }
+    return ""
+}
+
+function Test-PythonBaseImageNetworkFailure([string]$Details) {
+    if ([string]::IsNullOrWhiteSpace($Details)) { return $false }
+    $tail = (($Details -split "`r?`n") | Select-Object -Last 30) -join "`n"
+    $mentionsBaseImage = $tail -match '(?i)(docker\.io/library/python|library/python:3\.12-slim|registry-1\.docker\.io|m\.daocloud\.io/docker\.io/library/python|resolve source metadata|load metadata for)'
+    $isNetworkFailure = $tail -match '(?i)(failed to do request|failed to resolve|no such host|i/o timeout|TLS handshake timeout|connection reset|unexpected EOF|connectex|context deadline exceeded|429 Too Many Requests|net/http)'
+    return $mentionsBaseImage -and $isNetworkFailure
+}
+
+function Invoke-CheckerBuildWithFallback {
+    param(
+        [string]$ComposeFile,
+        [string]$WorkingDirectory,
+        [string]$Activity = "正在准备正方成绩检查服务",
+        [int]$StartPercent = 20,
+        [int]$EndPercent = 95
+    )
+
+    $officialImage = "python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf"
+    $mirrorImage = "m.daocloud.io/docker.io/library/python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf"
+    $configuredImage = Get-LocalBuildSetting -WorkingDirectory $WorkingDirectory `
+        -Name "PYTHON_BASE_IMAGE"
+    $previousProcessValue = [Environment]::GetEnvironmentVariable(
+        "PYTHON_BASE_IMAGE", "Process"
+    )
+
+    $candidates = [Collections.Generic.List[object]]::new()
+    if (-not [string]::IsNullOrWhiteSpace($configuredImage)) {
+        $candidates.Add([pscustomobject]@{
+            Image = $configuredImage
+            Label = "自定义 Python 镜像源"
+            Attempts = 3
+        })
+    }
+    if (-not ($candidates | Where-Object { $_.Image -eq $officialImage })) {
+        $candidates.Add([pscustomobject]@{
+            Image = $officialImage
+            Label = "Docker Hub 官方源"
+            Attempts = 3
+        })
+    }
+    if (-not ($candidates | Where-Object { $_.Image -eq $mirrorImage })) {
+        $candidates.Add([pscustomobject]@{
+            Image = $mirrorImage
+            Label = "DaoCloud 备用源"
+            Attempts = 2
+        })
+    }
+
+    $lastResult = $null
+    try {
+        foreach ($candidate in $candidates) {
+            [Environment]::SetEnvironmentVariable(
+                "PYTHON_BASE_IMAGE", $candidate.Image, "Process"
+            )
+            Write-WaitingStatus "正在使用$($candidate.Label)获取 Python 基础镜像"
+            for ($attempt = 1; $attempt -le $candidate.Attempts; $attempt++) {
+                $status = "构建成绩查询镜像（$($candidate.Label)，第 $attempt/$($candidate.Attempts) 次）"
+                $lastResult = Invoke-DockerWithProgress `
+                    -Arguments @("compose", "-f", $ComposeFile, "build", "checker") `
+                    -Activity $Activity -Status $status `
+                    -StartPercent $StartPercent -EndPercent $EndPercent `
+                    -WorkingDirectory $WorkingDirectory
+                if ($lastResult.ExitCode -eq 0) { return $lastResult }
+
+                $details = (($lastResult.ErrorOutput, $lastResult.Output) -join "`n")
+                if (-not (Test-PythonBaseImageNetworkFailure $details)) {
+                    Write-FailureStatus "构建失败并非 Python 镜像下载问题，已停止自动重试"
+                    return $lastResult
+                }
+                if ($attempt -lt $candidate.Attempts) {
+                    Write-WaitingStatus "Python 镜像下载失败，2 秒后自动重试"
+                    Start-Sleep -Seconds 2
+                }
+            }
+            if ($candidate.Image -ne $mirrorImage) {
+                Write-WaitingStatus "当前镜像源连续失败，正在切换备用镜像源"
+            }
+        }
+        return $lastResult
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable(
+            "PYTHON_BASE_IMAGE", $previousProcessValue, "Process"
+        )
+    }
+}
