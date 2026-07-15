@@ -342,20 +342,43 @@ try {
         "-e", "ZF_CAPTCHA_INPUT_TIMEOUT_SECONDS=300",
         "checker", "interactive-probe"
     )
-    $lastCaptchaHash = $null
+    # Keep mutable state in a reference object. Invoke-DockerWithProgress calls
+    # this block in a child scope under Windows PowerShell 5.1, where assigning
+    # a plain outer variable can be lost and make one image open twice.
+    $captchaState = [pscustomobject]@{
+        LastHash = $null
+        DialogOpen = $false
+    }
     $captchaTick = {
-        if (Test-Path -LiteralPath $CaptchaFile) {
-            try { $hash = (Get-FileHash -LiteralPath $CaptchaFile -Algorithm SHA256).Hash }
-            catch { $hash = $null }
-            if ($hash -and $hash -ne $lastCaptchaHash) {
-                $lastCaptchaHash = $hash
+        if (-not (Test-Path -LiteralPath $CaptchaFile)) {
+            return
+        }
+
+        try { $hash = (Get-FileHash -LiteralPath $CaptchaFile -Algorithm SHA256).Hash }
+        catch { $hash = $null }
+        if ($hash -and $hash -ne $captchaState.LastHash -and -not $captchaState.DialogOpen) {
+            $captchaState.LastHash = $hash
+            $captchaState.DialogOpen = $true
+            try {
+                Write-Host "[验证码] 检测到新的验证码图片，正在打开输入窗口。" -ForegroundColor Yellow
                 $answer = Show-CaptchaDialog $CaptchaFile
                 if ([string]::IsNullOrWhiteSpace($answer)) {
                     Write-Utf8NoBom $AnswerFile "__CANCEL__"
                 }
                 else {
                     Write-Utf8NoBom $AnswerFile $answer
+                    Write-Host "[验证码] 已提交本次输入，正在等待教务系统验证。" -ForegroundColor Green
                 }
+            }
+            finally {
+                # The image has been consumed. Removing it prevents the polling
+                # loop from reopening the same file; a genuine retry writes a
+                # new image and is allowed to open another dialog.
+                Remove-Item -LiteralPath $CaptchaFile -Force -ErrorAction SilentlyContinue
+                if (-not (Test-Path -LiteralPath $CaptchaFile)) {
+                    $captchaState.LastHash = $null
+                }
+                $captchaState.DialogOpen = $false
             }
         }
     }.GetNewClosure()
