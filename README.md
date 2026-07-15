@@ -103,7 +103,7 @@ cd check-scores-for-zf
   <img src="docs/images/03-vpn-login-instructions.png" alt="打开 EasyConnect 前显示的校园 VPN 登录说明" width="900">
 </p>
 
-> 操作：先读完注意事项，再点击“确定”。浏览器随后会打开本机 EasyConnect 页面。
+> 操作：先读完注意事项。VPN 地址可以在弹窗中选中或点击“复制地址”，终端也会同步显示完整地址；点击“打开登录页面”后，浏览器会打开本机 EasyConnect 页面。
 
 <table>
   <tr>

@@ -11,6 +11,7 @@ $ComposeFile = Join-Path $Root "compose.easyconnect.yml"
 $CaptchaFile = Join-Path $Root "runtime-data\kaptcha.png"
 $AnswerFile = Join-Path $Root "runtime-data\captcha-answer.txt"
 $ProbeSuccessFile = Join-Path $Root "runtime-data\interactive-probe-success"
+$VpnServerAddress = "https://newvpn.cumt.edu.cn"
 . (Join-Path $Root "windows-ui.ps1")
 
 try {
@@ -62,24 +63,94 @@ function Show-ErrorMessage([string]$Text) {
         -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
 }
 
-function Confirm-VpnLoginInstructions {
-    $text = @"
-接下来将打开本机专用的 EasyConnect 登录页面。
+function Confirm-VpnLoginInstructions([string]$VpnAddress) {
+    $form = [System.Windows.Forms.Form]::new()
+    $form.Text = "校园 VPN 登录注意事项"
+    $form.ClientSize = [System.Drawing.Size]::new(590, 330)
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+    $form.TopMost = $true
+    $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
 
-请按以下顺序操作：
-1. 在 EasyConnect 中登录 https://newvpn.cumt.edu.cn；
-2. 完成手机短信验证；
-3. 等待页面明确显示 VPN 已连接。
+    $intro = [System.Windows.Forms.Label]::new()
+    $intro.Text = "接下来将打开本机专用的 EasyConnect 登录页面。"
+    $intro.AutoSize = $true
+    $intro.Location = [System.Drawing.Point]::new(20, 20)
+    $form.Controls.Add($intro)
 
-连接成功后无需寻找或点击其他确认框，也不要关闭启动器。
-启动器会自动定期检测连接，并在成功后继续运行。
+    $steps = [System.Windows.Forms.Label]::new()
+    $steps.Text = "请按以下顺序操作：`r`n1. 复制下方地址并在 EasyConnect 中登录；`r`n2. 完成手机短信验证；`r`n3. 等待页面明确显示 VPN 已连接。"
+    $steps.AutoSize = $true
+    $steps.Location = [System.Drawing.Point]::new(20, 55)
+    $form.Controls.Add($steps)
 
-点击【确定】后再打开登录页面；点击【取消】可终止启动。
-"@
-    $result = Show-TopMostMessageBox -Text $text.Trim() -Title "校园 VPN 登录注意事项" `
-        -Buttons ([System.Windows.Forms.MessageBoxButtons]::OKCancel) `
-        -Icon ([System.Windows.Forms.MessageBoxIcon]::Information)
-    return $result -eq [System.Windows.Forms.DialogResult]::OK
+    $addressLabel = [System.Windows.Forms.Label]::new()
+    $addressLabel.Text = "校园 VPN 地址（可选中复制）："
+    $addressLabel.AutoSize = $true
+    $addressLabel.Location = [System.Drawing.Point]::new(20, 135)
+    $form.Controls.Add($addressLabel)
+
+    $addressBox = [System.Windows.Forms.TextBox]::new()
+    $addressBox.Text = $VpnAddress
+    $addressBox.ReadOnly = $true
+    $addressBox.Location = [System.Drawing.Point]::new(20, 158)
+    $addressBox.Size = [System.Drawing.Size]::new(420, 27)
+    $form.Controls.Add($addressBox)
+
+    $copyButton = [System.Windows.Forms.Button]::new()
+    $copyButton.Text = "复制地址"
+    $copyButton.Location = [System.Drawing.Point]::new(450, 156)
+    $copyButton.Size = [System.Drawing.Size]::new(115, 30)
+    $form.Controls.Add($copyButton)
+
+    $copyStatus = [System.Windows.Forms.Label]::new()
+    $copyStatus.Text = "也可以在终端中找到同一地址。"
+    $copyStatus.AutoSize = $true
+    $copyStatus.Location = [System.Drawing.Point]::new(20, 192)
+    $form.Controls.Add($copyStatus)
+
+    $notice = [System.Windows.Forms.Label]::new()
+    $notice.Text = "连接成功后无需返回寻找确认按钮，也不要关闭启动器。`r`n启动器会自动检测连接，并在成功后继续运行。"
+    $notice.AutoSize = $true
+    $notice.Location = [System.Drawing.Point]::new(20, 220)
+    $form.Controls.Add($notice)
+
+    $openButton = [System.Windows.Forms.Button]::new()
+    $openButton.Text = "打开登录页面"
+    $openButton.Location = [System.Drawing.Point]::new(315, 278)
+    $openButton.Size = [System.Drawing.Size]::new(125, 34)
+    $openButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $form.Controls.Add($openButton)
+
+    $cancelButton = [System.Windows.Forms.Button]::new()
+    $cancelButton.Text = "取消"
+    $cancelButton.Location = [System.Drawing.Point]::new(450, 278)
+    $cancelButton.Size = [System.Drawing.Size]::new(115, 34)
+    $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $form.Controls.Add($cancelButton)
+
+    $copyButton.Add_Click({
+        try {
+            $addressBox.SelectAll()
+            $addressBox.Copy()
+            $copyStatus.Text = "地址已复制到剪贴板。"
+        }
+        catch {
+            $copyStatus.Text = "自动复制失败，请选中地址后按 Ctrl+C。"
+        }
+    }.GetNewClosure())
+
+    $form.AcceptButton = $openButton
+    $form.CancelButton = $cancelButton
+    $form.ActiveControl = $openButton
+    try {
+        return $form.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK
+    }
+    finally {
+        $form.Dispose()
+    }
 }
 
 function Show-StartupProgress([int]$Percent, [string]$Status) {
@@ -362,7 +433,10 @@ function Invoke-StartAction {
 
             $VncPassword = Get-ProjectSetting "EC_VNC_PASSWORD" "zfcheck"
             $EncodedPassword = [Uri]::EscapeDataString($VncPassword)
-            if (-not (Confirm-VpnLoginInstructions)) {
+            Write-WaitingStatus "需要登录校园 VPN，请确认操作说明"
+            Write-Host "校园 VPN 地址：$VpnServerAddress"
+            Write-Host "可在弹窗中点击“复制地址”，也可以直接复制终端中的地址。"
+            if (-not (Confirm-VpnLoginInstructions -VpnAddress $VpnServerAddress)) {
                 throw "用户取消了 VPN 登录。"
             }
             Start-Process "http://127.0.0.1:18080/vnc.html?autoconnect=true&resize=scale&password=$EncodedPassword"
