@@ -22,11 +22,11 @@ class ShowdocNotifierTests(unittest.TestCase):
         response.json.return_value = {"error_code": 0}
         notifier.session.post = Mock(return_value=response)
 
-        notifier.send("连接断开", "累计检测 3 次")
+        notifier.send("连接断开", "累计监测 35 分钟")
 
         notifier.session.post.assert_called_once_with(
             notifier.url,
-            data={"title": "连接断开", "content": "累计检测 3 次"},
+            data={"title": "连接断开", "content": "累计监测 35 分钟"},
             timeout=20,
         )
         response.raise_for_status.assert_called_once_with()

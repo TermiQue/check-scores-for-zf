@@ -43,6 +43,22 @@ def vpn_tunnel_connected() -> bool:
     return any(line.split()[0] == "tun0" for line in lines if line.split())
 
 
+def format_monitoring_duration(elapsed_seconds: int) -> str:
+    """Format an incident duration for the compact WeChat alert title."""
+    elapsed_seconds = max(0, elapsed_seconds)
+    if elapsed_seconds < 60:
+        return "不足 1 分钟"
+
+    total_minutes = elapsed_seconds // 60
+    days, remaining_minutes = divmod(total_minutes, 24 * 60)
+    hours, minutes = divmod(remaining_minutes, 60)
+    if days:
+        return f"{days} 天 {hours} 小时" if hours else f"{days} 天"
+    if hours:
+        return f"{hours} 小时 {minutes} 分钟" if minutes else f"{hours} 小时"
+    return f"{minutes} 分钟"
+
+
 class ScoreChecker:
     def __init__(self, config: Config, *, notifier: Notifier | None = None):
         self.config = config
@@ -273,27 +289,32 @@ class ScoreChecker:
         now = int(time.time())
         previous_kind = self.store.get("failure_kind")
         try:
-            previous_count = int(self.store.get("failure_detection_count") or "0")
+            previous_started_at = int(self.store.get("failure_started_at") or str(now))
         except ValueError:
-            previous_count = 0
-        detection_count = previous_count + 1 if previous_kind == kind else 1
+            previous_started_at = now
+        started_at = previous_started_at if previous_kind == kind else now
+        if started_at > now:
+            started_at = now
+        monitoring_duration = format_monitoring_duration(now - started_at)
         title = (
             "成绩检查出现未知错误"
             if kind == "unknown"
             else (
                 f"{connection_name}连接断开，需要手动重启，"
-                f"累计检测 {detection_count} 次"
+                f"累计监测{monitoring_duration}"
             )
         )
-        # Count every failed check, including checks whose WeChat notification
-        # cannot be delivered. The last alert timestamp is still written only
-        # after a successful push, so a failed push is retried next time.
+        # Start timing at the first failure of this kind, including failures
+        # whose WeChat notification cannot be delivered. The alert timestamp is
+        # still written only after a successful push, so delivery is retried.
         self.store.set("failure_kind", kind)
-        self.store.set("failure_detection_count", str(detection_count))
+        self.store.set("failure_started_at", str(started_at))
+        self.store.delete("failure_detection_count")  # Migrate older state.
         self.store.set("failure_title", title)
         last = int(self.store.get(f"last_failure_alert_at:{kind}") or "0")
         if (
             previous_kind == kind
+            and last > 0
             and now - last < self.config.failure_alert_cooldown_seconds
         ):
             return
@@ -327,6 +348,7 @@ class ScoreChecker:
         self.store.delete("failure_active")
         self.store.delete("failure_kind")
         self.store.delete("failure_title")
+        self.store.delete("failure_started_at")
         self.store.delete("failure_detection_count")
 
     def check_once(self) -> None:
@@ -378,6 +400,7 @@ class ScoreChecker:
         self.store.delete("failure_active")
         self.store.delete("failure_kind")
         self.store.delete("failure_title")
+        self.store.delete("failure_started_at")
         self.store.delete("failure_detection_count")
         LOGGER.info(
             "更新通知已发送：新增 %d，变更 %d，消失 %d",
