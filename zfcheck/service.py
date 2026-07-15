@@ -240,7 +240,7 @@ class ScoreChecker:
     def _notify_failure(self, message: str) -> None:
         if any(text in message for text in ("验证码", "登录会话已过期", "未登录")):
             kind = "session"
-            title = "成绩检查暂停：正方登录已过期"
+            connection_name = "正方系统"
             summary = "正方登录 Cookie 已失效，需要重新完成图片验证码。"
             recovery = (
                 "恢复方法：在 Windows 项目目录双击 windows-launcher.cmd，"
@@ -251,14 +251,14 @@ class ScoreChecker:
             and not vpn_tunnel_connected()
         ):
             kind = "vpn"
-            title = "成绩检查暂停：VPN 已断开"
+            connection_name = "VPN"
             summary = "未检测到 EasyConnect 的 tun0 隧道或 VPN 路由。"
             recovery = (
                 "恢复方法：双击 windows-launcher.cmd，在 EasyConnect 页面重新登录并完成短信验证。"
             )
         elif any(text in message for text in ("教务", "成绩", "心跳", "连接", "超时")):
             kind = "zhengfang"
-            title = "成绩检查异常：正方教务不可用"
+            connection_name = "正方系统"
             summary = "VPN 隧道仍存在，但正方页面或接口未正常响应。"
             recovery = (
                 "恢复方法：通常无需重新配置，服务会自动重试；若持续失败，"
@@ -266,12 +266,31 @@ class ScoreChecker:
             )
         else:
             kind = "unknown"
-            title = "成绩检查出现未知错误"
+            connection_name = "服务"
             summary = "服务遇到尚未分类的异常。"
             recovery = "恢复方法：查看 checker 日志，并重新运行 windows-launcher.cmd。"
 
         now = int(time.time())
         previous_kind = self.store.get("failure_kind")
+        try:
+            previous_count = int(self.store.get("failure_detection_count") or "0")
+        except ValueError:
+            previous_count = 0
+        detection_count = previous_count + 1 if previous_kind == kind else 1
+        title = (
+            "成绩检查出现未知错误"
+            if kind == "unknown"
+            else (
+                f"{connection_name}连接断开，需要手动重启，"
+                f"累计检测 {detection_count} 次"
+            )
+        )
+        # Count every failed check, including checks whose WeChat notification
+        # cannot be delivered. The last alert timestamp is still written only
+        # after a successful push, so a failed push is retried next time.
+        self.store.set("failure_kind", kind)
+        self.store.set("failure_detection_count", str(detection_count))
+        self.store.set("failure_title", title)
         last = int(self.store.get(f"last_failure_alert_at:{kind}") or "0")
         if (
             previous_kind == kind
@@ -292,8 +311,6 @@ class ScoreChecker:
         )
         self.store.set(f"last_failure_alert_at:{kind}", str(now))
         self.store.set("failure_active", "1")
-        self.store.set("failure_kind", kind)
-        self.store.set("failure_title", title)
 
     def _notify_recovery(self) -> None:
         if self.store.get("failure_active") != "1":
@@ -310,6 +327,7 @@ class ScoreChecker:
         self.store.delete("failure_active")
         self.store.delete("failure_kind")
         self.store.delete("failure_title")
+        self.store.delete("failure_detection_count")
 
     def check_once(self) -> None:
         courses = self.fetch_courses()
@@ -360,6 +378,7 @@ class ScoreChecker:
         self.store.delete("failure_active")
         self.store.delete("failure_kind")
         self.store.delete("failure_title")
+        self.store.delete("failure_detection_count")
         LOGGER.info(
             "更新通知已发送：新增 %d，变更 %d，消失 %d",
             len(changes.added),

@@ -267,7 +267,7 @@ class FailureNotificationTests(unittest.TestCase):
             finally:
                 checker.store.close()
             title, content = checker.notifier.messages[0]
-            self.assertIn("正方登录已过期", title)
+            self.assertEqual("正方系统连接断开，需要手动重启，累计检测 1 次", title)
             self.assertIn("windows-launcher.cmd", content)
 
     @patch("zfcheck.service.vpn_tunnel_connected", return_value=False)
@@ -279,7 +279,7 @@ class FailureNotificationTests(unittest.TestCase):
             finally:
                 checker.store.close()
             title, content = checker.notifier.messages[0]
-            self.assertIn("VPN 已断开", title)
+            self.assertEqual("VPN连接断开，需要手动重启，累计检测 1 次", title)
             self.assertIn("短信验证", content)
 
     @patch("zfcheck.service.vpn_tunnel_connected", return_value=True)
@@ -291,7 +291,7 @@ class FailureNotificationTests(unittest.TestCase):
             finally:
                 checker.store.close()
             title, content = checker.notifier.messages[0]
-            self.assertIn("正方教务不可用", title)
+            self.assertEqual("正方系统连接断开，需要手动重启，累计检测 1 次", title)
             self.assertIn("自动重试", content)
 
     @patch("zfcheck.service.vpn_tunnel_connected", return_value=False)
@@ -305,8 +305,49 @@ class FailureNotificationTests(unittest.TestCase):
             finally:
                 checker.store.close()
             title, content = checker.notifier.messages[0]
-            self.assertIn("正方教务不可用", title)
-            self.assertNotIn("VPN 已断开", title)
+            self.assertEqual("正方系统连接断开，需要手动重启，累计检测 1 次", title)
+
+    @patch("zfcheck.service.vpn_tunnel_connected", return_value=False)
+    def test_repeated_failure_increments_detection_count(self, _mock_tunnel):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            checker = self._checker(temp_dir)
+            checker.config.failure_alert_cooldown_seconds = 0
+            try:
+                checker._notify_failure("获取成绩失败：连接超时")
+                checker._notify_failure("获取成绩失败：连接超时")
+            finally:
+                checker.store.close()
+
+            self.assertEqual(2, len(checker.notifier.messages))
+            self.assertEqual(
+                "VPN连接断开，需要手动重启，累计检测 2 次",
+                checker.notifier.messages[1][0],
+            )
+
+    @patch("zfcheck.service.vpn_tunnel_connected", return_value=False)
+    def test_failed_push_is_retried_and_still_increments_count(self, _mock_tunnel):
+        class FailOnceNotifier(CaptureNotifier):
+            def send(self, title, content):
+                if not self.messages:
+                    self.messages.append((title, content))
+                    raise RuntimeError("push failed")
+                super().send(title, content)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            checker = self._checker(temp_dir)
+            checker.notifier = FailOnceNotifier()
+            try:
+                with self.assertRaises(RuntimeError):
+                    checker._notify_failure("获取成绩失败：连接超时")
+                checker._notify_failure("获取成绩失败：连接超时")
+            finally:
+                checker.store.close()
+
+            self.assertEqual(2, len(checker.notifier.messages))
+            self.assertEqual(
+                "VPN连接断开，需要手动重启，累计检测 2 次",
+                checker.notifier.messages[1][0],
+            )
 
 
 class SessionPersistenceTests(unittest.TestCase):

@@ -30,7 +30,9 @@ class ShowdocNotifier(Notifier):
     def send(self, title: str, content: str) -> None:
         response = self.session.post(
             self.url,
-            json={"title": title, "content": content},
+            # ShowDoc Push reads these values from form fields. Sending JSON can
+            # make the API report that title/content is missing.
+            data={"title": title, "content": content},
             timeout=self.timeout,
         )
         response.raise_for_status()
