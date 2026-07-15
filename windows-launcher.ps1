@@ -309,7 +309,8 @@ function Invoke-StartAction {
     $ZhengfangLoginUrl = Get-ZhengfangLoginUrl
     Show-StartupProgress 38 "检测 Windows 与 Docker 的教务网络"
     if (Test-WindowsZhengfangAccess $ZhengfangLoginUrl) {
-        Write-Host "宿主机可访问正方教务，正在选择 Docker 直连方式。"
+        Write-SuccessStatus "Windows 宿主机可访问正方教务"
+        Show-StartupProgress 42 "验证 Docker 直连教务网络"
         if (Test-DockerZhengfangAccess $DirectComposeArguments) {
             $SelectedComposeArguments = $DirectComposeArguments
             $NetworkModeLabel = "宿主机直连"
@@ -323,11 +324,11 @@ function Invoke-StartAction {
         }
     }
     else {
-        Write-Host "宿主机当前无法直连正方教务，正在检查隔离的容器 VPN。"
+        Write-SuccessStatus "Windows 网络检测完成，将检查隔离的容器 VPN"
     }
 
     if ($null -ne $SelectedComposeArguments) {
-        Write-Host "已选择$NetworkModeLabel，不需要启动 EasyConnect。"
+        Write-SuccessStatus "已选择$NetworkModeLabel，不需要启动 EasyConnect"
         Invoke-DockerCommand -Arguments ($VpnComposeArguments + @("stop", "easyconnect")) -Quiet
     }
     else {
@@ -337,7 +338,10 @@ function Invoke-StartAction {
             if (Test-DockerZhengfangAccess $VpnComposeArguments) {
                 $SelectedComposeArguments = $VpnComposeArguments
                 $NetworkModeLabel = "已连接的容器 VPN"
-                Write-Host "现有容器 VPN 可用，将直接复用且不打开登录页面。"
+                Write-SuccessStatus "现有容器 VPN 可用，将直接复用且不打开登录页面"
+            }
+            else {
+                Write-SuccessStatus "现有容器 VPN 检查完成，需要重新建立连接"
             }
         }
 
@@ -383,8 +387,8 @@ function Invoke-StartAction {
         throw "所选网络模式无法访问正方教务，请重新运行启动程序。"
     }
 
-    Show-StartupProgress 76 "验证正方教务账号登录"
     Write-Host "如教务系统要求图片验证码，将自动显示输入窗口。"
+    Show-StartupProgress 76 "验证正方教务账号登录"
     $arguments = $SelectedComposeArguments + @(
         "run", "--rm", "--no-deps", "-T",
         "-e", "ZF_CAPTCHA_INPUT_FILE=/data/captcha-answer.txt",
@@ -417,7 +421,7 @@ function Invoke-StartAction {
                 }
                 else {
                     Write-Utf8NoBom $AnswerFile $answer
-                    Write-RunningStatus "验证码已提交，正在等待教务系统验证"
+                    Write-Host "验证码已提交，正在等待教务系统验证。"
                 }
             }
             finally {
@@ -606,6 +610,7 @@ function Invoke-EraseAction([switch]$SkipConfirmation) {
         }
 
         Show-ActionStage 65 "删除本地账号、会话、成绩与配置数据"
+        Suspend-RunningStatus
         $generatedPaths = @(
             (Join-Path $Root "secrets"),
             (Join-Path $Root "runtime-data"),
@@ -693,6 +698,7 @@ function Invoke-LogsAction {
         $arguments = @("compose", "-f", $ComposeFile, "--profile", "vpn", "logs", "--no-color", "--tail", "120")
         if ($Follow) { $arguments += "--follow" }
         $arguments += $services
+        Suspend-RunningStatus
 
         $previousPreference = $ErrorActionPreference
         try {
@@ -710,6 +716,7 @@ function Invoke-LogsAction {
         if ($logExitCode -ne 0 -and -not $Follow) {
             throw "日志读取失败。服务可能尚未启动，或对应容器已经被删除。"
         }
+        Complete-RunningStatus "$modeText已结束"
         return $true
     }
     catch {

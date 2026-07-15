@@ -69,19 +69,51 @@ function Write-LauncherTitle([string]$Text) {
 }
 
 function Write-RunningStatus([string]$Text) {
-    Write-UiColor -Text "[运行状态] $Text" -HexColor $script:UiRunningColor
+    if (-not [string]::IsNullOrWhiteSpace($script:UiActiveOperation)) {
+        Complete-RunningStatus
+    }
+    $script:UiActiveOperation = $Text
+    Write-UiColor -Text "[运行] $Text" -HexColor $script:UiRunningColor -NoNewline
 }
 
 function Write-WaitingStatus([string]$Text) {
-    Write-UiColor -Text "[等待输入] $Text" -HexColor $script:UiWaitingColor
+    if (-not [string]::IsNullOrWhiteSpace($script:UiActiveOperation)) {
+        Clear-LiveProgress "等待输入"
+    }
+    Write-UiColor -Text $Text -HexColor $script:UiWaitingColor
 }
 
 function Write-SuccessStatus([string]$Text) {
-    Write-UiColor -Text "[运行成功] $Text" -HexColor $script:UiSuccessColor
+    if (-not [string]::IsNullOrWhiteSpace($script:UiActiveOperation)) {
+        Clear-LiveProgress $Text
+    }
+    Write-UiColor -Text "[成功] $Text" -HexColor $script:UiSuccessColor
+    $script:UiActiveOperation = $null
+}
+
+function Complete-RunningStatus([string]$Text = "") {
+    $completedText = if ([string]::IsNullOrWhiteSpace($Text)) {
+        $script:UiActiveOperation
+    }
+    else {
+        $Text
+    }
+    if ([string]::IsNullOrWhiteSpace($completedText)) { return }
+    Write-SuccessStatus $completedText
+}
+
+function Suspend-RunningStatus {
+    if (-not [string]::IsNullOrWhiteSpace($script:UiActiveOperation)) {
+        Clear-LiveProgress "等待输入"
+    }
 }
 
 function Write-FailureStatus([string]$Text) {
-    Write-UiColor -Text "[运行失败] $Text" -HexColor $script:UiRunningColor
+    if (-not [string]::IsNullOrWhiteSpace($script:UiActiveOperation)) {
+        Clear-LiveProgress $Text
+    }
+    $script:UiActiveOperation = $null
+    Write-UiColor -Text "错误：$Text" -HexColor $script:UiRunningColor
 }
 
 function Write-LiveProgress {
@@ -99,7 +131,7 @@ function Write-LiveProgress {
     $bar = ("#" * $filled) + ("-" * ($width - $filled))
     $spinner = @('|', '/', '-', '\')[$Frame % 4]
     Clear-LiveProgress $Activity
-    $line = "[运行状态] [$bar] $safePercent% $spinner $Status（${ElapsedSeconds} 秒）"
+    $line = "[运行] [$bar] $safePercent% $spinner $Status（${ElapsedSeconds} 秒）"
     Write-UiColor -Text $line -HexColor $script:UiRunningColor -NoNewline
 }
 
@@ -157,6 +189,7 @@ function Invoke-DockerWithProgress {
     $progressCleared = $false
 
     try {
+        Write-RunningStatus $Status
         $process = Start-Process -FilePath "docker" -ArgumentList $argumentText `
             -WorkingDirectory $WorkingDirectory -NoNewWindow -PassThru `
             -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
@@ -198,6 +231,9 @@ function Invoke-DockerWithProgress {
                     Write-Host "  | $_"
                 }
             }
+        }
+        else {
+            Complete-RunningStatus ("{0}（{1:N1} 秒）" -f $Status, $stopwatch.Elapsed.TotalSeconds)
         }
 
         return [pscustomobject]@{
