@@ -40,6 +40,12 @@ docker compose -f .\compose.easyconnect.yml logs -f checker
 docker compose -f .\compose.easyconnect.yml --profile vpn logs --tail 120 easyconnect
 ```
 
+<p align="center">
+  <img src="images/09-live-log-view.png" alt="通过统一启动器实时查看成绩检查日志" width="900">
+</p>
+
+> 实时日志会持续刷新；查看结束时按 `Ctrl+C` 返回启动器，不会停止后台服务。
+
 ## 微信推送检查
 
 如果成绩检查成功但微信没有收到消息，可以发送测试通知：
@@ -85,6 +91,12 @@ docker compose -f .\compose.easyconnect.yml run --rm checker notify-test
 - `.env`、测试缓存、本项目容器、网络和服务镜像。
 
 不会删除 Git 仓库、源代码、Docker Desktop 或其他项目的数据。为了完整删除容器和镜像，执行清理时应保持 Docker Desktop 运行。
+
+<p align="center">
+  <img src="images/10-privacy-reset.png" alt="统一启动器执行全部隐私数据清除" width="900">
+</p>
+
+> 只有输入 `ERASE` 才会执行清理；输入内容不匹配时会显示“已取消”并保留窗口，所有本地数据保持不变。
 
 ## 已知边界
 
