@@ -21,6 +21,18 @@ class WindowsLauncherContractTests(unittest.TestCase):
             content,
         )
 
+    def test_error_text_is_normalized_before_showing_a_dialog(self):
+        launcher = (ROOT / "windows-launcher.ps1").read_text(
+            encoding="utf-8-sig"
+        )
+        ui = (ROOT / "windows-ui.ps1").read_text(encoding="utf-8-sig")
+
+        self.assertIn("ConvertTo-ReadableText $Text", launcher)
+        self.assertIn("function ConvertTo-ReadableText", ui)
+        self.assertIn("[Console]::OutputEncoding", ui)
+        self.assertIn("Get-Content -LiteralPath $stdoutPath -Raw -Encoding UTF8", ui)
+        self.assertIn("Get-Content -LiteralPath $stderrPath -Raw -Encoding UTF8", ui)
+
 
 if __name__ == "__main__":
     unittest.main()

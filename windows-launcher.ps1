@@ -58,7 +58,8 @@ function Show-Info([string]$Text, [string]$Title = "成绩检查服务") {
 }
 
 function Show-ErrorMessage([string]$Text) {
-    Show-TopMostMessageBox -Text $Text -Title "启动失败" `
+    $readableText = ConvertTo-ReadableText $Text
+    Show-TopMostMessageBox -Text $readableText -Title "启动失败" `
         -Buttons ([System.Windows.Forms.MessageBoxButtons]::OK) `
         -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
 }

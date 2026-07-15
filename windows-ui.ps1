@@ -39,6 +39,40 @@ function Repair-DuplicateProcessPath {
 
 Repair-DuplicateProcessPath
 
+# Windows PowerShell 5.1 otherwise inherits the legacy system code page and
+# can decode UTF-8 output from Docker/Python as mojibake before it reaches the
+# terminal or a WinForms error dialog.
+$script:UiUtf8Encoding = [Text.UTF8Encoding]::new($false)
+try {
+    [Console]::InputEncoding = $script:UiUtf8Encoding
+    [Console]::OutputEncoding = $script:UiUtf8Encoding
+}
+catch {
+    # Redirected/non-console hosts may not expose mutable console encodings.
+}
+$global:OutputEncoding = $script:UiUtf8Encoding
+
+function ConvertTo-ReadableText([string]$Text) {
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+
+    # Repair the common case where UTF-8 bytes were already decoded as the
+    # Simplified Chinese Windows code page (for example "正方" -> "姝ｆ柟").
+    $mojibakePattern = '姝ｆ|鎴愮|妫€|湇鍔|惎鍔|璇峰|鍚庨|閲嶈|锛|銆|鈥|鏈|缁撴|澶辫触|鍚'
+    if ($Text -notmatch $mojibakePattern) { return $Text }
+
+    try {
+        $legacyEncoding = [Text.Encoding]::GetEncoding(936)
+        $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
+        $repaired = $strictUtf8.GetString($legacyEncoding.GetBytes($Text))
+        if (-not [string]::IsNullOrWhiteSpace($repaired)) { return $repaired }
+    }
+    catch {
+        # Some bytes may already have been replaced with '?', which cannot be
+        # recovered safely. Preserve the original instead of guessing.
+    }
+    return $Text
+}
+
 if (-not ("ZfConsoleSpinner" -as [type])) {
     Add-Type -TypeDefinition @"
 using System;
@@ -174,6 +208,7 @@ function Suspend-RunningStatus {
 }
 
 function Write-FailureStatus([string]$Text) {
+    $Text = ConvertTo-ReadableText $Text
     if (-not [string]::IsNullOrWhiteSpace($script:UiActiveOperation)) {
         Clear-LiveProgress $Text
     }
@@ -285,8 +320,8 @@ function Invoke-DockerWithProgress {
         Clear-LiveProgress $Activity
         $progressCleared = $true
 
-        $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue } else { "" }
-        $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue } else { "" }
+        $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue } else { "" }
+        $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue } else { "" }
         $details = (($stderr, $stdout) -join "`n").Trim()
 
         if ($exitCode -ne 0) {
