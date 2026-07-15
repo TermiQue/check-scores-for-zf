@@ -148,6 +148,31 @@ class CaptureNotifier:
         self.messages.append((title, content))
 
 
+class ForceLoginTests(unittest.TestCase):
+    def test_force_login_clears_only_saved_session(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            store = StateStore(data_dir)
+            store.set("login_cookies", '{"JSESSIONID": "old"}')
+            store.set_snapshot({"course": {"title": "高等数学", "grade": "90"}})
+            store.close()
+            config = SimpleNamespace(
+                data_dir=data_dir,
+                url="http://example.invalid/jwglxt/",
+                request_timeout_seconds=5,
+                proxy=None,
+            )
+
+            with patch.dict("os.environ", {"ZF_FORCE_LOGIN": "1"}):
+                checker = ScoreChecker(config, notifier=NullNotifier())
+            try:
+                self.assertFalse(checker.logged_in)
+                self.assertIsNone(checker.store.get("login_cookies"))
+                self.assertIsNotNone(checker.store.get_snapshot())
+            finally:
+                checker.close()
+
+
 class InitialCheckTests(unittest.TestCase):
     def test_first_check_pushes_all_courses_before_saving_baseline(self):
         with tempfile.TemporaryDirectory() as temp_dir:

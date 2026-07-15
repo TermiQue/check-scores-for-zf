@@ -66,7 +66,15 @@ class ScoreChecker:
         self.notifier = notifier or build_notifier(
             config.push_provider, config.push_token, config.request_timeout_seconds
         )
-        saved_cookies = self._load_cookies()
+        force_login = os.getenv("ZF_FORCE_LOGIN", "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if force_login:
+            self.store.delete("login_cookies")
+        saved_cookies = {} if force_login else self._load_cookies()
         self.client = self._new_client(cookies=saved_cookies)
         self.logged_in = bool(saved_cookies)
 

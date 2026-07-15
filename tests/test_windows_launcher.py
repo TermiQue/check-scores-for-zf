@@ -33,6 +33,22 @@ class WindowsLauncherContractTests(unittest.TestCase):
         self.assertIn("Get-Content -LiteralPath $stdoutPath -Raw -Encoding UTF8", ui)
         self.assertIn("Get-Content -LiteralPath $stderrPath -Raw -Encoding UTF8", ui)
 
+    def test_login_failure_offers_retry_and_credential_change(self):
+        content = (ROOT / "windows-launcher.ps1").read_text(
+            encoding="utf-8-sig"
+        )
+
+        self.assertIn('$retryButton.Text = "重新输入验证码"', content)
+        self.assertIn('$changeButton.Text = "更改账号密码"', content)
+        self.assertIn('$showPassword.Text = "显示密码"', content)
+        self.assertIn('"-e", "ZF_FORCE_LOGIN=1"', content)
+        self.assertIn("Write-Utf8NoBom $usernamePath $credentials.Username", content)
+        self.assertIn("Write-Utf8NoBom $passwordPath $credentials.Password", content)
+        self.assertNotIn(
+            "正方登录验证失败。请查看上方日志后重新运行",
+            content,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

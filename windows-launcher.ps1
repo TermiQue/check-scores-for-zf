@@ -11,6 +11,7 @@ $ComposeFile = Join-Path $Root "compose.easyconnect.yml"
 $CaptchaFile = Join-Path $Root "runtime-data\kaptcha.png"
 $AnswerFile = Join-Path $Root "runtime-data\captcha-answer.txt"
 $ProbeSuccessFile = Join-Path $Root "runtime-data\interactive-probe-success"
+$ProbeErrorFile = Join-Path $Root "runtime-data\interactive-probe-error.txt"
 $VpnServerAddress = "https://newvpn.cumt.edu.cn"
 . (Join-Path $Root "windows-ui.ps1")
 
@@ -152,6 +153,227 @@ function Confirm-VpnLoginInstructions([string]$VpnAddress) {
     finally {
         $form.Dispose()
     }
+}
+
+function Show-LoginRecoveryDialog {
+    param(
+        [string]$Username,
+        [string]$Password,
+        [string]$ErrorText
+    )
+
+    $form = [System.Windows.Forms.Form]::new()
+    $form.Text = "正方教务登录未成功"
+    $form.ClientSize = [System.Drawing.Size]::new(620, 390)
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+    $form.TopMost = $true
+    $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+
+    $heading = [System.Windows.Forms.Label]::new()
+    $heading.Text = "登录验证失败，请选择下一步操作。"
+    $heading.AutoSize = $true
+    $heading.Location = [System.Drawing.Point]::new(20, 18)
+    $form.Controls.Add($heading)
+
+    $errorBox = [System.Windows.Forms.TextBox]::new()
+    $errorBox.Text = (ConvertTo-ReadableText $ErrorText)
+    $errorBox.ReadOnly = $true
+    $errorBox.Multiline = $true
+    $errorBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
+    $errorBox.Location = [System.Drawing.Point]::new(20, 45)
+    $errorBox.Size = [System.Drawing.Size]::new(580, 85)
+    $form.Controls.Add($errorBox)
+
+    $accountLabel = [System.Windows.Forms.Label]::new()
+    $accountLabel.Text = "当前学号："
+    $accountLabel.AutoSize = $true
+    $accountLabel.Location = [System.Drawing.Point]::new(20, 150)
+    $form.Controls.Add($accountLabel)
+
+    $accountBox = [System.Windows.Forms.TextBox]::new()
+    $accountBox.Text = $Username
+    $accountBox.ReadOnly = $true
+    $accountBox.Location = [System.Drawing.Point]::new(120, 146)
+    $accountBox.Size = [System.Drawing.Size]::new(300, 27)
+    $form.Controls.Add($accountBox)
+
+    $passwordLabel = [System.Windows.Forms.Label]::new()
+    $passwordLabel.Text = "当前密码："
+    $passwordLabel.AutoSize = $true
+    $passwordLabel.Location = [System.Drawing.Point]::new(20, 190)
+    $form.Controls.Add($passwordLabel)
+
+    $passwordBox = [System.Windows.Forms.TextBox]::new()
+    $passwordBox.Text = $Password
+    $passwordBox.ReadOnly = $true
+    $passwordBox.UseSystemPasswordChar = $true
+    $passwordBox.Location = [System.Drawing.Point]::new(120, 186)
+    $passwordBox.Size = [System.Drawing.Size]::new(300, 27)
+    $form.Controls.Add($passwordBox)
+
+    $showPassword = [System.Windows.Forms.CheckBox]::new()
+    $showPassword.Text = "显示密码"
+    $showPassword.AutoSize = $true
+    $showPassword.Location = [System.Drawing.Point]::new(440, 188)
+    $form.Controls.Add($showPassword)
+
+    $help = [System.Windows.Forms.Label]::new()
+    $help.Text = "验证码不清楚或输入错误时，可重新获取并输入验证码。`r`n账号或密码有误时，请选择【更改账号密码】。"
+    $help.AutoSize = $true
+    $help.Location = [System.Drawing.Point]::new(20, 235)
+    $form.Controls.Add($help)
+
+    $retryButton = [System.Windows.Forms.Button]::new()
+    $retryButton.Text = "重新输入验证码"
+    $retryButton.Location = [System.Drawing.Point]::new(145, 325)
+    $retryButton.Size = [System.Drawing.Size]::new(140, 38)
+    $retryButton.DialogResult = [System.Windows.Forms.DialogResult]::Retry
+    $form.Controls.Add($retryButton)
+
+    $changeButton = [System.Windows.Forms.Button]::new()
+    $changeButton.Text = "更改账号密码"
+    $changeButton.Location = [System.Drawing.Point]::new(295, 325)
+    $changeButton.Size = [System.Drawing.Size]::new(140, 38)
+    $changeButton.DialogResult = [System.Windows.Forms.DialogResult]::Yes
+    $form.Controls.Add($changeButton)
+
+    $cancelButton = [System.Windows.Forms.Button]::new()
+    $cancelButton.Text = "取消启动"
+    $cancelButton.Location = [System.Drawing.Point]::new(445, 325)
+    $cancelButton.Size = [System.Drawing.Size]::new(120, 38)
+    $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $form.Controls.Add($cancelButton)
+
+    $showPassword.Add_CheckedChanged({
+        $passwordBox.UseSystemPasswordChar = -not $showPassword.Checked
+    }.GetNewClosure())
+
+    $form.AcceptButton = $retryButton
+    $form.CancelButton = $cancelButton
+    $form.ActiveControl = $retryButton
+    try {
+        $result = $form.ShowDialog()
+        if ($result -eq [System.Windows.Forms.DialogResult]::Retry) { return "Retry" }
+        if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { return "Change" }
+        return "Cancel"
+    }
+    finally {
+        $form.Dispose()
+    }
+}
+
+function Show-CredentialsDialog {
+    param(
+        [string]$Username,
+        [string]$Password
+    )
+
+    $form = [System.Windows.Forms.Form]::new()
+    $form.Text = "更改正方教务账号密码"
+    $form.ClientSize = [System.Drawing.Size]::new(530, 250)
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+    $form.TopMost = $true
+
+    $accountLabel = [System.Windows.Forms.Label]::new()
+    $accountLabel.Text = "正方教务学号："
+    $accountLabel.AutoSize = $true
+    $accountLabel.Location = [System.Drawing.Point]::new(22, 32)
+    $form.Controls.Add($accountLabel)
+
+    $accountBox = [System.Windows.Forms.TextBox]::new()
+    $accountBox.Text = $Username
+    $accountBox.Location = [System.Drawing.Point]::new(150, 28)
+    $accountBox.Size = [System.Drawing.Size]::new(345, 27)
+    $form.Controls.Add($accountBox)
+
+    $passwordLabel = [System.Windows.Forms.Label]::new()
+    $passwordLabel.Text = "正方教务密码："
+    $passwordLabel.AutoSize = $true
+    $passwordLabel.Location = [System.Drawing.Point]::new(22, 82)
+    $form.Controls.Add($passwordLabel)
+
+    $passwordBox = [System.Windows.Forms.TextBox]::new()
+    $passwordBox.Text = $Password
+    $passwordBox.UseSystemPasswordChar = $true
+    $passwordBox.Location = [System.Drawing.Point]::new(150, 78)
+    $passwordBox.Size = [System.Drawing.Size]::new(345, 27)
+    $form.Controls.Add($passwordBox)
+
+    $showPassword = [System.Windows.Forms.CheckBox]::new()
+    $showPassword.Text = "显示密码"
+    $showPassword.AutoSize = $true
+    $showPassword.Location = [System.Drawing.Point]::new(150, 115)
+    $form.Controls.Add($showPassword)
+
+    $validation = [System.Windows.Forms.Label]::new()
+    $validation.Text = "保存后会立即使用新凭据重新验证，不会删除成绩基线。"
+    $validation.AutoSize = $true
+    $validation.Location = [System.Drawing.Point]::new(22, 155)
+    $form.Controls.Add($validation)
+
+    $saveButton = [System.Windows.Forms.Button]::new()
+    $saveButton.Text = "保存并重新验证"
+    $saveButton.Location = [System.Drawing.Point]::new(270, 195)
+    $saveButton.Size = [System.Drawing.Size]::new(145, 36)
+    $saveButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $form.Controls.Add($saveButton)
+
+    $cancelButton = [System.Windows.Forms.Button]::new()
+    $cancelButton.Text = "返回"
+    $cancelButton.Location = [System.Drawing.Point]::new(425, 195)
+    $cancelButton.Size = [System.Drawing.Size]::new(70, 36)
+    $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $form.Controls.Add($cancelButton)
+
+    $showPassword.Add_CheckedChanged({
+        $passwordBox.UseSystemPasswordChar = -not $showPassword.Checked
+    }.GetNewClosure())
+
+    $form.AcceptButton = $saveButton
+    $form.CancelButton = $cancelButton
+    $form.ActiveControl = $accountBox
+    try {
+        while ($true) {
+            $result = $form.ShowDialog()
+            if ($result -ne [System.Windows.Forms.DialogResult]::OK) { return $null }
+            $newUsername = $accountBox.Text.Trim()
+            $newPassword = $passwordBox.Text
+            if (-not [string]::IsNullOrWhiteSpace($newUsername) -and -not [string]::IsNullOrEmpty($newPassword)) {
+                return [pscustomobject]@{
+                    Username = $newUsername
+                    Password = $newPassword
+                }
+            }
+            $validation.Text = "学号和密码不能为空，请补充后重新保存。"
+            $validation.ForeColor = [System.Drawing.Color]::Firebrick
+            $form.DialogResult = [System.Windows.Forms.DialogResult]::None
+            $form.ActiveControl = $accountBox
+        }
+    }
+    finally {
+        $form.Dispose()
+    }
+}
+
+function Read-Utf8Secret([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return "" }
+    return (Get-Content -LiteralPath $Path -Raw -Encoding UTF8).Trim()
+}
+
+function Get-InteractiveProbeFailureMessage($ProbeResult) {
+    if (Test-Path -LiteralPath $ProbeErrorFile) {
+        $message = (Get-Content -LiteralPath $ProbeErrorFile -Raw -Encoding UTF8).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($message)) {
+            return ConvertTo-ReadableText $message
+        }
+    }
+    return "正方教务未接受本次登录。请检查验证码、学号和密码。"
 }
 
 function Show-StartupProgress([int]$Percent, [string]$Status) {
@@ -369,7 +591,8 @@ function Invoke-StartAction {
     Show-StartupProgress 30 "本地配置与成绩查询镜像准备完成"
 
     New-Item -ItemType Directory -Force -Path ".\runtime-data", ".\easyconnect-data" | Out-Null
-    Remove-Item -LiteralPath $CaptchaFile, $AnswerFile, $ProbeSuccessFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $CaptchaFile, $AnswerFile, $ProbeSuccessFile, $ProbeErrorFile `
+        -Force -ErrorAction SilentlyContinue
 
     $DirectComposeArguments = @("compose", "-f", ".\compose.easyconnect.yml")
     $HostComposeArguments = @(
@@ -436,7 +659,7 @@ function Invoke-StartAction {
             $EncodedPassword = [Uri]::EscapeDataString($VncPassword)
             Write-WaitingStatus "需要登录校园 VPN，请确认操作说明"
             Write-Host "校园 VPN 地址：$VpnServerAddress"
-            Write-Host "可在弹窗中点击“复制地址”，也可以直接复制终端中的地址。"
+            Write-Host "可在弹窗中点击【复制地址】，也可以直接复制终端中的地址。"
             if (-not (Confirm-VpnLoginInstructions -VpnAddress $VpnServerAddress)) {
                 throw "用户取消了 VPN 登录。"
             }
@@ -470,64 +693,106 @@ function Invoke-StartAction {
     }
 
     Write-Host "如教务系统要求图片验证码，将自动显示输入窗口。"
-    Show-StartupProgress 76 "验证正方教务账号登录"
-    $arguments = $SelectedComposeArguments + @(
-        "run", "--rm", "--no-deps", "-T",
-        "-e", "ZF_CAPTCHA_INPUT_FILE=/data/captcha-answer.txt",
-        "-e", "ZF_CAPTCHA_INPUT_TIMEOUT_SECONDS=300",
-        "checker", "interactive-probe"
-    )
-    # Keep mutable state in a reference object. Invoke-DockerWithProgress calls
-    # this block in a child scope under Windows PowerShell 5.1, where assigning
-    # a plain outer variable can be lost and make one image open twice.
-    $captchaState = [pscustomobject]@{
-        LastHash = $null
-        DialogOpen = $false
-    }
-    $captchaTick = {
-        if (-not (Test-Path -LiteralPath $CaptchaFile)) {
-            return
+    $forceFreshLogin = $false
+    while ($true) {
+        Show-StartupProgress 76 "验证正方教务账号登录"
+        Remove-Item -LiteralPath $CaptchaFile, $AnswerFile, $ProbeSuccessFile, $ProbeErrorFile `
+            -Force -ErrorAction SilentlyContinue
+
+        $arguments = $SelectedComposeArguments + @(
+            "run", "--rm", "--no-deps", "-T",
+            "-e", "ZF_CAPTCHA_INPUT_FILE=/data/captcha-answer.txt",
+            "-e", "ZF_CAPTCHA_INPUT_TIMEOUT_SECONDS=300"
+        )
+        if ($forceFreshLogin) {
+            $arguments += @("-e", "ZF_FORCE_LOGIN=1")
+        }
+        $arguments += @("checker", "interactive-probe")
+
+        # Keep mutable state in a reference object. Invoke-DockerWithProgress
+        # calls this block in a child scope under Windows PowerShell 5.1.
+        $captchaState = [pscustomobject]@{
+            LastHash = $null
+            DialogOpen = $false
+        }
+        $captchaTick = {
+            if (-not (Test-Path -LiteralPath $CaptchaFile)) { return }
+
+            try { $hash = (Get-FileHash -LiteralPath $CaptchaFile -Algorithm SHA256).Hash }
+            catch { $hash = $null }
+            if ($hash -and $hash -ne $captchaState.LastHash -and -not $captchaState.DialogOpen) {
+                $captchaState.LastHash = $hash
+                $captchaState.DialogOpen = $true
+                try {
+                    Clear-LiveProgress "验证码输入"
+                    Write-WaitingStatus "请在弹出的窗口中输入正方教务验证码"
+                    $answer = Show-CaptchaDialog $CaptchaFile
+                    if ([string]::IsNullOrWhiteSpace($answer)) {
+                        Write-Utf8NoBom $AnswerFile "__CANCEL__"
+                    }
+                    else {
+                        Write-Utf8NoBom $AnswerFile $answer
+                        Write-Host "验证码已提交，正在等待教务系统验证。"
+                    }
+                }
+                finally {
+                    Remove-Item -LiteralPath $CaptchaFile -Force -ErrorAction SilentlyContinue
+                    if (-not (Test-Path -LiteralPath $CaptchaFile)) {
+                        $captchaState.LastHash = $null
+                    }
+                    $captchaState.DialogOpen = $false
+                }
+            }
+        }.GetNewClosure()
+
+        $probeResult = Invoke-DockerWithProgress -Arguments $arguments `
+            -Activity "正在启动正方成绩检查服务" -Status "登录正方教务并读取成绩" `
+            -StartPercent 76 -EndPercent 89 -WorkingDirectory $Root -OnTick $captchaTick
+        $probeSucceeded = Test-Path -LiteralPath $ProbeSuccessFile
+        Remove-Item -LiteralPath $ProbeSuccessFile -Force -ErrorAction SilentlyContinue
+        if ($probeSucceeded) {
+            Remove-Item -LiteralPath $ProbeErrorFile -Force -ErrorAction SilentlyContinue
+            if ($probeResult.ExitCode -ne 0) {
+                Write-ChineseWarning "正方验证已经成功，但 Docker 清理临时容器时返回了退出码 $($probeResult.ExitCode)；启动将继续。"
+            }
+            break
         }
 
-        try { $hash = (Get-FileHash -LiteralPath $CaptchaFile -Algorithm SHA256).Hash }
-        catch { $hash = $null }
-        if ($hash -and $hash -ne $captchaState.LastHash -and -not $captchaState.DialogOpen) {
-            $captchaState.LastHash = $hash
-            $captchaState.DialogOpen = $true
-            try {
-                Clear-LiveProgress "验证码输入"
-                Write-WaitingStatus "请在弹出的窗口中输入正方教务验证码"
-                $answer = Show-CaptchaDialog $CaptchaFile
-                if ([string]::IsNullOrWhiteSpace($answer)) {
-                    Write-Utf8NoBom $AnswerFile "__CANCEL__"
-                }
-                else {
-                    Write-Utf8NoBom $AnswerFile $answer
-                    Write-Host "验证码已提交，正在等待教务系统验证。"
-                }
+        $failureMessage = Get-InteractiveProbeFailureMessage $probeResult
+        $usernamePath = Join-Path $Root "secrets\zf_username.txt"
+        $passwordPath = Join-Path $Root "secrets\zf_password.txt"
+        $currentUsername = Read-Utf8Secret $usernamePath
+        $currentPassword = Read-Utf8Secret $passwordPath
+        Write-WaitingStatus "正方登录未成功，请在弹窗中选择重试或更改账号密码"
+
+        while ($true) {
+            $recoveryAction = Show-LoginRecoveryDialog `
+                -Username $currentUsername -Password $currentPassword `
+                -ErrorText $failureMessage
+            if ($recoveryAction -eq "Retry") {
+                $forceFreshLogin = $true
+                Write-WaitingStatus "正在获取新的验证码并重新验证"
+                break
             }
-            finally {
-                # The image has been consumed. Removing it prevents the polling
-                # loop from reopening the same file; a genuine retry writes a
-                # new image and is allowed to open another dialog.
-                Remove-Item -LiteralPath $CaptchaFile -Force -ErrorAction SilentlyContinue
-                if (-not (Test-Path -LiteralPath $CaptchaFile)) {
-                    $captchaState.LastHash = $null
-                }
-                $captchaState.DialogOpen = $false
+            if ($recoveryAction -eq "Change") {
+                $credentials = Show-CredentialsDialog `
+                    -Username $currentUsername -Password $currentPassword
+                if ($null -eq $credentials) { continue }
+
+                Write-Utf8NoBom $usernamePath $credentials.Username
+                Write-Utf8NoBom $passwordPath $credentials.Password
+                $currentUsername = $credentials.Username
+                $currentPassword = $credentials.Password
+                $forceFreshLogin = $true
+                Write-SuccessStatus "账号密码已更新，将立即重新验证"
+                break
             }
+
+            Remove-Item -LiteralPath $CaptchaFile, $AnswerFile, $ProbeErrorFile `
+                -Force -ErrorAction SilentlyContinue
+            Write-WaitingStatus "已取消启动；账号、密码和成绩基线均已保留"
+            return $false
         }
-    }.GetNewClosure()
-    $probeResult = Invoke-DockerWithProgress -Arguments $arguments `
-        -Activity "正在启动正方成绩检查服务" -Status "登录正方教务并读取成绩" `
-        -StartPercent 76 -EndPercent 89 -WorkingDirectory $Root -OnTick $captchaTick
-    $probeSucceeded = Test-Path -LiteralPath $ProbeSuccessFile
-    Remove-Item -LiteralPath $ProbeSuccessFile -Force -ErrorAction SilentlyContinue
-    if (-not $probeSucceeded) {
-        throw "正方登录验证失败。请查看上方日志后重新运行 windows-launcher.cmd。"
-    }
-    if ($probeResult.ExitCode -ne 0) {
-        Write-ChineseWarning "正方验证已经成功，但 Docker 清理临时容器时返回了退出码 $($probeResult.ExitCode)；启动将继续。"
     }
 
     Show-StartupProgress 90 "启动后台成绩定时检查服务"

@@ -20,6 +20,11 @@ class SuccessfulChecker:
         pass
 
 
+class FailedChecker(SuccessfulChecker):
+    def probe(self, *, interactive=False):
+        raise RuntimeError("用户名或密码不正确")
+
+
 class InteractiveProbeCommandTests(unittest.TestCase):
     def test_success_writes_host_visible_marker(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -36,6 +41,25 @@ class InteractiveProbeCommandTests(unittest.TestCase):
             self.assertEqual(0, exit_code)
             marker = Path(temp_dir) / "interactive-probe-success"
             self.assertEqual("ok\n", marker.read_text(encoding="ascii"))
+
+    def test_failure_writes_host_visible_reason(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = SimpleNamespace(data_dir=Path(temp_dir))
+            with patch.object(
+                __main__, "parse_args", return_value=SimpleNamespace(command="interactive-probe")
+            ), patch.object(
+                __main__.Config, "from_env", return_value=config
+            ), patch.object(
+                __main__, "ScoreChecker", FailedChecker
+            ):
+                exit_code = __main__.main()
+
+            self.assertEqual(1, exit_code)
+            marker = Path(temp_dir) / "interactive-probe-error.txt"
+            self.assertEqual(
+                "用户名或密码不正确\n",
+                marker.read_text(encoding="utf-8"),
+            )
 
 
 if __name__ == "__main__":

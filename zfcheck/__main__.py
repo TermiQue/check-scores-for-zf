@@ -73,6 +73,7 @@ def main() -> int:
             "Safe login diagnostics are being written to %s", debug_path
         )
     args = parse_args()
+    config = None
     try:
         if args.command == "network-probe":
             network_probe()
@@ -81,6 +82,12 @@ def main() -> int:
         config = Config.from_env(
             require_push=args.command not in {"probe", "interactive-probe"}
         )
+        if args.command == "interactive-probe":
+            for marker_name in (
+                "interactive-probe-success",
+                "interactive-probe-error.txt",
+            ):
+                (config.data_dir / marker_name).unlink(missing_ok=True)
         checker = ScoreChecker(config)
         try:
             if args.command == "probe":
@@ -101,6 +108,12 @@ def main() -> int:
     except KeyboardInterrupt:
         return 130
     except Exception as exc:
+        if args.command == "interactive-probe" and config is not None:
+            try:
+                error_marker = config.data_dir / "interactive-probe-error.txt"
+                error_marker.write_text(f"{exc}\n", encoding="utf-8")
+            except OSError:
+                logging.getLogger(__name__).exception("无法写入交互登录错误标记")
         logging.getLogger(__name__).error("%s", exc)
         return 1
 
