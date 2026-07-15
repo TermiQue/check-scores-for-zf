@@ -13,6 +13,13 @@ $AnswerFile = Join-Path $Root "runtime-data\captcha-answer.txt"
 $ProbeSuccessFile = Join-Path $Root "runtime-data\interactive-probe-success"
 . (Join-Path $Root "windows-ui.ps1")
 
+try {
+    $Host.UI.RawUI.WindowTitle = "正方成绩检查服务启动器"
+}
+catch {
+    # Some non-console hosts do not expose a writable window title.
+}
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
