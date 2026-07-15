@@ -126,7 +126,7 @@ class ScoreChecker:
             if answer == "__CANCEL__":
                 raise CheckError("用户取消了验证码输入")
             return answer
-        raise CheckError("等待验证码输入超时，请重新运行 windows-start.cmd")
+        raise CheckError("等待验证码输入超时，请重新运行 windows-launcher.cmd")
 
     def _login(self, *, interactive: bool = False) -> None:
         result = self.client.login(self.config.username, self.config.password)
@@ -243,7 +243,7 @@ class ScoreChecker:
             title = "成绩检查暂停：正方登录已过期"
             summary = "正方登录 Cookie 已失效，需要重新完成图片验证码。"
             recovery = (
-                "恢复方法：在 Windows 项目目录双击 windows-start.cmd，"
+                "恢复方法：在 Windows 项目目录双击 windows-launcher.cmd，"
                 "按提示完成验证码，服务会自动恢复。"
             )
         elif (
@@ -254,7 +254,7 @@ class ScoreChecker:
             title = "成绩检查暂停：VPN 已断开"
             summary = "未检测到 EasyConnect 的 tun0 隧道或 VPN 路由。"
             recovery = (
-                "恢复方法：双击 windows-start.cmd，在 EasyConnect 页面重新登录并完成短信验证。"
+                "恢复方法：双击 windows-launcher.cmd，在 EasyConnect 页面重新登录并完成短信验证。"
             )
         elif any(text in message for text in ("教务", "成绩", "心跳", "连接", "超时")):
             kind = "zhengfang"
@@ -262,13 +262,13 @@ class ScoreChecker:
             summary = "VPN 隧道仍存在，但正方页面或接口未正常响应。"
             recovery = (
                 "恢复方法：通常无需重新配置，服务会自动重试；若持续失败，"
-                "请双击 windows-start.cmd 重新验证连接。"
+                "请双击 windows-launcher.cmd 重新验证连接。"
             )
         else:
             kind = "unknown"
             title = "成绩检查出现未知错误"
             summary = "服务遇到尚未分类的异常。"
-            recovery = "恢复方法：查看 checker 日志，并重新运行 windows-start.cmd。"
+            recovery = "恢复方法：查看 checker 日志，并重新运行 windows-launcher.cmd。"
 
         now = int(time.time())
         previous_kind = self.store.get("failure_kind")

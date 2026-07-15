@@ -268,7 +268,7 @@ class FailureNotificationTests(unittest.TestCase):
                 checker.store.close()
             title, content = checker.notifier.messages[0]
             self.assertIn("正方登录已过期", title)
-            self.assertIn("windows-start.cmd", content)
+            self.assertIn("windows-launcher.cmd", content)
 
     @patch("zfcheck.service.vpn_tunnel_connected", return_value=False)
     def test_missing_tunnel_is_reported_as_vpn_failure(self, _mock_tunnel):

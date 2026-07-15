@@ -1,5 +1,9 @@
 ﻿[CmdletBinding()]
-param()
+param(
+    [ValidateSet("Menu", "Start", "Stop", "Erase", "Logs", "FollowLogs")]
+    [string]$Action = "Menu",
+    [switch]$Force
+)
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -214,9 +218,11 @@ function Test-DockerZhengfangAccess([string[]]$ComposeArguments) {
     return $script:LastDockerExitCode -eq 0
 }
 
-$OriginalLocation = Get-Location
-Set-Location $Root
-try {
+function Invoke-StartAction {
+    $actionSucceeded = $false
+    $OriginalLocation = Get-Location
+    Set-Location $Root
+    try {
     Write-Host "`n=== 正方成绩检查服务：智能启动 ===" -ForegroundColor Cyan
     Show-StartupProgress 5 "检查 Docker Desktop 与项目运行环境"
 
@@ -388,7 +394,7 @@ try {
     $probeSucceeded = Test-Path -LiteralPath $ProbeSuccessFile
     Remove-Item -LiteralPath $ProbeSuccessFile -Force -ErrorAction SilentlyContinue
     if (-not $probeSucceeded) {
-        throw "正方登录验证失败。请查看上方日志后重新运行 windows-start.cmd。"
+        throw "正方登录验证失败。请查看上方日志后重新运行 windows-launcher.cmd。"
     }
     if ($probeResult.ExitCode -ne 0) {
         Write-ChineseWarning "正方验证已经成功，但 Docker 清理临时容器时返回了退出码 $($probeResult.ExitCode)；启动将继续。"
@@ -403,14 +409,317 @@ try {
     Show-StartupProgress 100 "启动完成"
     Complete-StartupProgress
     Write-Host "`n启动完成，网络模式：$NetworkModeLabel。" -ForegroundColor Green
-    Show-Info "启动完成。`n`n网络模式：$NetworkModeLabel。`n服务将在后台检查成绩；首次运行会推送全部成绩，之后无变化时保持静默。`n`nDocker Desktop 重启后，请再次双击 windows-start.cmd 手动启动。"
+        Show-Info "启动完成。`n`n网络模式：$NetworkModeLabel。`n服务将在后台检查成绩；首次运行会推送全部成绩，之后无变化时保持静默。`n`nDocker Desktop 重启后，请再次双击 windows-launcher.cmd 手动启动。"
+        $actionSucceeded = $true
+    }
+    catch {
+        Complete-StartupProgress
+        Write-Host "`n启动失败：$($_.Exception.Message)" -ForegroundColor Red
+        Show-ErrorMessage $_.Exception.Message
+    }
+    finally {
+        Set-Location $OriginalLocation
+    }
+    return $actionSucceeded
 }
-catch {
-    Complete-StartupProgress
-    Write-Host "`n启动失败：$($_.Exception.Message)" -ForegroundColor Red
-    Show-ErrorMessage $_.Exception.Message
+
+function Show-ActionStage([int]$Percent, [string]$Status) {
+    Write-Host ("[阶段 {0,3}%] {1}" -f $Percent, $Status) -ForegroundColor Cyan
+}
+
+function Invoke-StopAction {
+    $actionSucceeded = $false
+    $OriginalLocation = Get-Location
+    Set-Location $Root
+    try {
+        Write-Host "`n=== 正方成绩检查服务：安全停止 ===" -ForegroundColor Cyan
+        Show-ActionStage 10 "检查 Docker Desktop 与项目配置"
+        if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            throw "未找到 Docker。请先安装并启动 Docker Desktop。"
+        }
+        Invoke-DockerCommand -Arguments @("info") -Quiet
+        if ($script:LastDockerExitCode -ne 0) {
+            throw "Docker Desktop 尚未启动。"
+        }
+
+        Show-ActionStage 30 "停止成绩检查器与校园 VPN 容器"
+        $stopResult = Invoke-DockerWithProgress `
+            -Arguments @("compose", "-f", $ComposeFile, "--profile", "vpn", "down") `
+            -Activity "正在停止正方成绩检查服务" -Status "停止并移除项目容器与网络" `
+            -StartPercent 30 -EndPercent 95 -WorkingDirectory $Root
+        if ($stopResult.ExitCode -ne 0) {
+            throw "容器停止失败，请查看上方诊断信息。"
+        }
+
+        Show-ActionStage 100 "服务已安全停止"
+        Write-Host "服务已停止；本地账号、登录会话和成绩基线均已保留。" -ForegroundColor Green
+        $actionSucceeded = $true
+    }
+    catch {
+        Write-Host "停止失败：$($_.Exception.Message)" -ForegroundColor Red
+    }
+    finally {
+        Set-Location $OriginalLocation
+    }
+    return $actionSucceeded
+}
+
+function Assert-SafeGeneratedPath([string]$Path) {
+    $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    )
+    $pathFull = [IO.Path]::GetFullPath($Path).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    )
+    $rootPrefix = $rootFull + [IO.Path]::DirectorySeparatorChar
+    if (
+        $pathFull -eq $rootFull -or
+        -not $pathFull.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)
+    ) {
+        throw "拒绝删除项目目录之外的路径：$pathFull"
+    }
+    return $pathFull
+}
+
+function Remove-GeneratedPath([string]$Path) {
+    $safePath = Assert-SafeGeneratedPath $Path
+    if (Test-Path -LiteralPath $safePath) {
+        Remove-Item -LiteralPath $safePath -Recurse -Force
+        Write-Host "  已删除：$($safePath.Substring($Root.Length).TrimStart('\'))"
+    }
+}
+
+function Ensure-ComposeSecretPlaceholders {
+    $secretsPath = Assert-SafeGeneratedPath (Join-Path $Root "secrets")
+    New-Item -ItemType Directory -Path $secretsPath -Force | Out-Null
+    foreach ($name in @("zf_username.txt", "zf_password.txt", "push_token.txt")) {
+        $secretPath = Join-Path $secretsPath $name
+        if (-not (Test-Path -LiteralPath $secretPath)) {
+            [IO.File]::WriteAllText($secretPath, "", [Text.UTF8Encoding]::new($false))
+        }
+    }
+}
+
+function Invoke-EraseAction([switch]$SkipConfirmation) {
+    $actionSucceeded = $false
+    $OriginalLocation = Get-Location
+    Set-Location $Root
+    try {
+        Write-Host "`n=== 隐私数据清除与项目重置 ===" -ForegroundColor Cyan
+        Show-ActionStage 0 "等待用户确认清理范围"
+        Write-Host "此操作会将工作目录恢复到刚克隆后的状态，并删除："
+        Write-Host "  - 正方账号、密码和 ShowDoc Push Token"
+        Write-Host "  - 正方登录会话、成绩基线、验证码、日志和故障状态"
+        Write-Host "  - EasyConnect 登录配置、短信验证会话和 VPN 缓存"
+        Write-Host "  - 本地 .env 配置、Python/测试缓存"
+        Write-Host "  - 本项目的 Docker 容器、网络和服务镜像"
+        Write-Host "`n不会删除：Git 仓库、项目源代码、Docker Desktop 或其他项目的数据。" -ForegroundColor Green
+        Write-ChineseWarning "该操作不可撤销。再次启动时需要重新输入全部凭据并完成所有验证。"
+
+        if (-not $SkipConfirmation) {
+            $confirmation = ([string](Read-Host "确认永久清除请输入 ERASE（不区分大小写）")).Trim()
+            if ($confirmation -ne "ERASE") {
+                Write-Host "已取消，未删除任何数据。" -ForegroundColor Yellow
+                return $true
+            }
+        }
+
+        $dockerCleanupIncomplete = $false
+        Show-ActionStage 10 "检查 Docker Desktop 与项目资源"
+        $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
+        if ($dockerCommand) {
+            Invoke-DockerCommand -Arguments @("info") -Quiet
+            if ($script:LastDockerExitCode -eq 0) {
+                Ensure-ComposeSecretPlaceholders
+                Show-ActionStage 25 "停止本项目的所有容器"
+                $stopResult = Invoke-DockerWithProgress `
+                    -Arguments @("compose", "-f", $ComposeFile, "--profile", "vpn", "stop") `
+                    -Activity "正在清除隐私数据并重置项目" -Status "停止本项目的所有容器" `
+                    -StartPercent 25 -EndPercent 42 -WorkingDirectory $Root
+                if ($stopResult.ExitCode -ne 0) {
+                    throw "本项目容器未能全部停止。为避免运行中的服务继续读写数据，本次未清除任何隐私文件。"
+                }
+
+                Show-ActionStage 45 "删除项目容器、网络和服务镜像"
+                $removeResult = Invoke-DockerWithProgress `
+                    -Arguments @(
+                        "compose", "-f", $ComposeFile, "--profile", "vpn", "down",
+                        "--remove-orphans", "--volumes", "--rmi", "all"
+                    ) `
+                    -Activity "正在清除隐私数据并重置项目" -Status "删除项目容器、网络和服务镜像" `
+                    -StartPercent 45 -EndPercent 62 -WorkingDirectory $Root
+                if ($removeResult.ExitCode -ne 0) {
+                    $dockerCleanupIncomplete = $true
+                    Write-ChineseWarning "Docker 资源未能全部删除；仍将继续清除本地隐私文件。"
+                }
+            }
+            else {
+                $dockerCleanupIncomplete = $true
+                Write-ChineseWarning "Docker Desktop 未运行，暂时无法删除项目容器、网络和镜像。"
+            }
+        }
+
+        Show-ActionStage 65 "删除本地账号、会话、成绩与配置数据"
+        $generatedPaths = @(
+            (Join-Path $Root "secrets"),
+            (Join-Path $Root "runtime-data"),
+            (Join-Path $Root "easyconnect-data"),
+            (Join-Path $Root ".env"),
+            (Join-Path $Root ".env.poc"),
+            (Join-Path $Root ".pytest_cache"),
+            (Join-Path $Root ".coverage"),
+            (Join-Path $Root "coverage.xml"),
+            (Join-Path $Root "htmlcov"),
+            (Join-Path $Root "kaptcha.png"),
+            (Join-Path $Root "login-debug.log")
+        )
+        foreach ($path in $generatedPaths) {
+            Remove-GeneratedPath $path
+        }
+        foreach ($directoryName in @("scripts", "tests", "zfcheck")) {
+            $sourcePath = Join-Path $Root $directoryName
+            if (-not (Test-Path -LiteralPath $sourcePath)) { continue }
+            Get-ChildItem -LiteralPath $sourcePath -Directory -Filter "__pycache__" -Recurse -Force |
+                Sort-Object FullName -Descending |
+                ForEach-Object { Remove-GeneratedPath $_.FullName }
+            Get-ChildItem -LiteralPath $sourcePath -File -Filter "*.pyc" -Recurse -Force |
+                ForEach-Object { Remove-GeneratedPath $_.FullName }
+        }
+
+        Show-ActionStage 95 "核对隐私数据清理结果"
+        if ($dockerCleanupIncomplete) {
+            Write-ChineseWarning "本地隐私文件已删除，但 Docker 资源清理未完成。启动 Docker Desktop 后请再次运行清理。"
+            return $false
+        }
+
+        Show-ActionStage 100 "隐私数据清理完成"
+        Write-Host "隐私数据已全部清除，项目已恢复到刚克隆后的状态。" -ForegroundColor Green
+        $actionSucceeded = $true
+    }
+    catch {
+        Write-Host "清理失败：$($_.Exception.Message)" -ForegroundColor Red
+    }
+    finally {
+        Set-Location $OriginalLocation
+    }
+    return $actionSucceeded
+}
+
+function Invoke-LogsAction {
+    param(
+        [switch]$Follow,
+        [switch]$AskService
+    )
+
+    $OriginalLocation = Get-Location
+    Set-Location $Root
+    try {
+        Write-Host "`n=== 运行日志查询 ===" -ForegroundColor Cyan
+        if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            throw "未找到 Docker。请先安装并启动 Docker Desktop。"
+        }
+        Invoke-DockerCommand -Arguments @("info") -Quiet
+        if ($script:LastDockerExitCode -ne 0) {
+            throw "Docker Desktop 尚未启动。"
+        }
+
+        $services = @("checker")
+        if ($AskService) {
+            Write-Host "[1] 成绩检查服务日志（推荐）"
+            Write-Host "[2] 校园 VPN 日志"
+            Write-Host "[3] 两个服务的全部日志"
+            Write-Host "[0] 返回主菜单"
+            $logChoice = ([string](Read-Host "请选择日志类型")).Trim()
+            switch ($logChoice) {
+                "0" { return $true }
+                "2" { $services = @("easyconnect") }
+                "3" { $services = @("checker", "easyconnect") }
+                default { $services = @("checker") }
+            }
+        }
+
+        $modeText = if ($Follow) { "实时日志" } else { "最近 120 行日志" }
+        Write-Host "正在显示$modeText。" -ForegroundColor Green
+        if ($Follow) {
+            Write-Host "按 Ctrl+C 可停止跟踪并返回启动器。" -ForegroundColor Yellow
+        }
+        $arguments = @("compose", "-f", $ComposeFile, "--profile", "vpn", "logs", "--no-color", "--tail", "120")
+        if ($Follow) { $arguments += "--follow" }
+        $arguments += $services
+
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            # Convert the native success stream to host output so callers can
+            # capture the Boolean result without swallowing the log lines.
+            & docker @arguments 2>&1 | ForEach-Object {
+                Write-Host ([string]$_)
+            }
+            $logExitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        if ($logExitCode -ne 0 -and -not $Follow) {
+            throw "日志读取失败。服务可能尚未启动，或对应容器已经被删除。"
+        }
+        return $true
+    }
+    catch {
+        Write-Host "日志查询失败：$($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+    finally {
+        Set-Location $OriginalLocation
+    }
+}
+
+function Wait-ForMenuReturn {
+    Write-Host ""
+    Read-Host "按 Enter 返回主菜单" | Out-Null
+}
+
+function Show-LauncherMenu {
+    while ($true) {
+        Clear-Host
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "       正方成绩检查服务启动器" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "[1] 启动或恢复服务"
+        Write-Host "[2] 停止服务"
+        Write-Host "[3] 查看最近日志"
+        Write-Host "[4] 实时跟踪日志"
+        Write-Host "[5] 清除全部隐私数据并重置"
+        Write-Host "[0] 退出"
+        Write-Host ""
+        $choice = ([string](Read-Host "请选择操作")).Trim()
+        switch ($choice) {
+            "1" { $null = Invoke-StartAction; Wait-ForMenuReturn }
+            "2" { $null = Invoke-StopAction; Wait-ForMenuReturn }
+            "3" { $null = Invoke-LogsAction -AskService; Wait-ForMenuReturn }
+            "4" { $null = Invoke-LogsAction -AskService -Follow; Wait-ForMenuReturn }
+            "5" { $null = Invoke-EraseAction; Wait-ForMenuReturn }
+            "0" { return }
+            default {
+                Write-Host "无效选项，请输入 0 到 5。" -ForegroundColor Yellow
+                Start-Sleep -Seconds 1
+            }
+        }
+    }
+}
+
+$result = $true
+switch ($Action) {
+    "Start" { $result = Invoke-StartAction }
+    "Stop" { $result = Invoke-StopAction }
+    "Erase" { $result = Invoke-EraseAction -SkipConfirmation:$Force }
+    "Logs" { $result = Invoke-LogsAction }
+    "FollowLogs" { $result = Invoke-LogsAction -Follow }
+    default { Show-LauncherMenu; $result = $true }
+}
+
+if (-not $result) {
     exit 1
-}
-finally {
-    Set-Location $OriginalLocation
 }

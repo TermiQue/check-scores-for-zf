@@ -56,13 +56,9 @@ check-scores-for-zf/
 ├── compose.host.yml          # 叠加：checker 使用 Host 网络
 ├── compose.vpn.yml           # 叠加：checker 共享 EasyConnect 网络命名空间
 ├── Dockerfile                # checker 镜像（Python 3.12-slim，非 root）
-├── windows-start.cmd         # 一键启动入口（双击或 PowerShell）
-├── windows-start.ps1         # 启动编排脚本
-├── windows-stop.cmd          # 停止全部容器
-├── windows-stop.ps1
+├── windows-launcher.cmd      # 统一入口：启动、停止、日志与隐私清理
+├── windows-launcher.ps1      # 统一 Windows 编排与中文菜单
 ├── windows-setup.ps1         # 首次配置账号与 ShowDoc Token
-├── windows-clear-cache.cmd   # 清除全部隐私数据
-├── windows-clear-cache.ps1
 ├── windows-ui.ps1            # PowerShell WinForms 工具函数（进度条、Docker 包装器）
 ├── .env.example              # 可选配置模板
 └── docs/
@@ -113,30 +109,33 @@ https://push.showdoc.com.cn/server/api/push/你的token
 
 推送地址和 Token 都属于私密凭证，请勿截图公开或提交到 Git。如果在 ShowDoc 中重置了推送地址，需要重新运行 `windows-setup.ps1` 更新本地凭证。更多接口说明见 [ShowDoc Push 官方文档](https://www.showdoc.com.cn/push)。
 
-在项目目录中双击 `windows-start.cmd`，或者在 PowerShell 中只执行一个命令：
+在项目目录中双击统一启动器：
 
 ```powershell
-.\windows-start.cmd
+.\windows-launcher.cmd
 ```
 
 启动程序会自动完成环境检查、首次配置、镜像构建、网络模式选择、正方登录和后台服务启动。只有宿主机无法直连且容器 VPN 也未连接时，才会打开 EasyConnect 页面；正方需要图片验证码时会直接弹出轻量输入窗口。
+
+启动器菜单还可以停止服务、查看最近 120 行日志、实时跟踪日志，以及清除全部隐私数据。日常使用不再需要记忆多个 CMD 或 Docker 命令。
 
 完整的从零部署、成功标志、开机运行和故障排查见 [Windows 部署手册](WINDOWS-CONTAINER-VPN.md)。实现原理见 [架构说明](docs/ARCHITECTURE.md)。
 
 ## 常用命令
 
 ```powershell
-# 一键启动或恢复（首次运行自动配置账号）
-.\windows-start.cmd
+# 打开统一中文菜单
+.\windows-launcher.cmd
+
+# 也可以直接执行指定操作
+.\windows-launcher.ps1 -Action Start
+.\windows-launcher.ps1 -Action Stop
+.\windows-launcher.ps1 -Action Logs
+.\windows-launcher.ps1 -Action FollowLogs
+.\windows-launcher.ps1 -Action Erase
 
 # 仅配置或更新账号与推送凭证
 .\windows-setup.ps1
-
-# 停止全部容器（保留账号、Cookie 和成绩基线）
-.\windows-stop.cmd
-
-# 清除全部隐私数据并恢复到刚克隆状态
-.\windows-clear-cache.cmd
 
 # 查看服务状态
 docker compose -f .\compose.easyconnect.yml --profile vpn ps
@@ -184,7 +183,7 @@ REQUEST_TIMEOUT_SECONDS=20
 - `runtime-data/`：登录 Cookie、成绩快照和验证码；
 - `easyconnect-data/`：EasyConnect 登录配置。
 
-转让电脑、停止使用或需要从全新状态重新测试时，可以双击 `windows-clear-cache.cmd`。脚本要求输入 `ERASE` 后，删除项目运行后产生的全部隐私数据和本地配置，包括账号密码、ShowDoc Token、`.env`、正方 Cookie、成绩基线、日志、验证码、EasyConnect 配置与 VPN 会话，同时删除本项目的容器、网络和服务镜像。Git 仓库、源代码、Docker Desktop 和其他项目的数据不会被删除。清理后再次启动需要重新输入全部凭据并完成短信及图片验证码。
+转让电脑、停止使用或需要从全新状态重新测试时，打开 `windows-launcher.cmd` 并选择“清除全部隐私数据并重置”。输入 `ERASE` 后，启动器会删除项目运行后产生的全部隐私数据和本地配置，包括账号密码、ShowDoc Token、`.env`、正方 Cookie、成绩基线、日志、验证码、EasyConnect 配置与 VPN 会话，同时删除本项目的容器、网络和服务镜像。Git 仓库、源代码、Docker Desktop 和其他项目的数据不会被删除。清理后再次启动需要重新输入全部凭据并完成短信及图片验证码。
 
 首次发布前建议执行：
 
@@ -196,7 +195,7 @@ git grep -n -I -E "你的学号|你的Token|你的密码"
 ## 已知限制
 
 - 短信验证码和正方图片验证码必须由用户本人输入，项目不会绕过验证码。
-- 如果学校强制 VPN 或正方会话重新认证，重新运行 `windows-start.cmd` 即可。
+- 如果学校强制 VPN 或正方会话重新认证，重新运行 `windows-launcher.cmd` 即可。
 - 当前容器 VPN 配置针对矿大验证；其他学校需要调整 VPN 地址、正方地址及登录兼容参数。
 - 项目依赖第三方 EasyConnect 容器镜像；镜像已在 Compose 中固定到不可变摘要，升级前应重新验证。
 

@@ -92,7 +92,7 @@ https://push.showdoc.com.cn/server/api/push/你的token
 - 完整专属推送地址；
 - 地址最后一段 `你的token`。
 
-首次运行 `windows-start.cmd` 时，将它粘贴到 ShowDoc Push Token 输入提示中。输入内容不会显示在终端，并会保存到已被 Git 忽略的 `secrets/push_token.txt`。
+首次运行 `windows-launcher.cmd` 时，将它粘贴到 ShowDoc Push Token 输入提示中。输入内容不会显示在终端，并会保存到已被 Git 忽略的 `secrets/push_token.txt`。
 
 注意：
 
@@ -101,21 +101,21 @@ https://push.showdoc.com.cn/server/api/push/你的token
 - 微信没有系统弹窗或未读数提醒时，可按 [ShowDoc 官方提醒设置说明](https://www.showdoc.com.cn/p/ba3f342eaff63072eb1976a5e18443c8) 检查公众号通知设置；
 - API 和 Token 格式以 [ShowDoc Push 官方文档](https://www.showdoc.com.cn/push) 为准。
 
-## 一键启动
+## 统一启动器
 
 进入项目目录，双击：
 
 ```text
-windows-start.cmd
+windows-launcher.cmd
 ```
 
 也可以在 PowerShell 中运行：
 
 ```powershell
-.\windows-start.cmd
+.\windows-launcher.cmd
 ```
 
-启动程序会自动完成：
+启动器打开后选择“启动或恢复服务”。启动流程会自动完成：
 
 1. 检查 Docker Desktop；
 2. 首次运行时询问正方账号、密码和 ShowDoc Token；
@@ -130,7 +130,7 @@ windows-start.cmd
 
 执行 Docker 构建、网络验证和容器启停时，窗口会在同一行动态刷新中文进度、百分比和耗时。Docker 正常运行时的英文层下载与容器状态输出会被收纳，不再刷屏；仅在 Docker 操作失败时显示中文原因，并附最后 12 行原始诊断信息供排错。
 
-不再需要依次运行 setup、POC、Compose 启动和日志四个命令。
+同一菜单还可以停止服务、查看最近日志、实时跟踪日志和清除隐私数据，不再需要记忆多份脚本或 Docker 命令。
 
 ## VPN 登录
 
@@ -201,10 +201,10 @@ noVNC 只监听本机 `127.0.0.1`，不会暴露到局域网。
 
 | 通知 | 含义 | 恢复方法 |
 | --- | --- | --- |
-| `VPN 已断开` | EasyConnect 隧道或 VPN 路由不存在 | 运行 `windows-start.cmd`，在 EasyConnect 中重新登录并完成短信验证 |
-| `正方教务不可用` | VPN 仍连接，但正方页面或接口异常 | 通常等待自动重试；持续失败时运行 `windows-start.cmd` 重新验证 |
-| `正方登录已过期` | Cookie 失效，需要图片验证码 | 运行 `windows-start.cmd`，在弹窗中输入新验证码 |
-| `未知错误` | 尚未分类的程序异常 | 查看 checker 日志，再运行 `windows-start.cmd` |
+| `VPN 已断开` | EasyConnect 隧道或 VPN 路由不存在 | 运行 `windows-launcher.cmd`，在 EasyConnect 中重新登录并完成短信验证 |
+| `正方教务不可用` | VPN 仍连接，但正方页面或接口异常 | 通常等待自动重试；持续失败时运行 `windows-launcher.cmd` 重新验证 |
+| `正方登录已过期` | Cookie 失效，需要图片验证码 | 运行 `windows-launcher.cmd`，在弹窗中输入新验证码 |
+| `未知错误` | 尚未分类的程序异常 | 查看 checker 日志，再运行 `windows-launcher.cmd` |
 
 同类故障默认 6 小时内不重复推送；故障类型变化会立即通知。连接恢复后会发送一次恢复通知。
 
@@ -216,23 +216,17 @@ EasyConnect 和 checker 都使用 `restart: "no"`。
 
 - Docker Desktop 重启后，项目容器不会自行启动；
 - Windows 开机后不会自动连接学校 VPN；
-- 需要使用时手动双击 `windows-start.cmd`；
+- 需要使用时手动双击 `windows-launcher.cmd`；
 - 启动程序会复用已有 VPN 配置、正方 Cookie 和成绩基线。
 
 这样可以避免用户没有主动使用时后台自动连接学校 VPN。
 
 ## 停止服务
 
-双击：
-
-```text
-windows-stop.cmd
-```
-
-或者在 PowerShell 中运行：
+双击 `windows-launcher.cmd`，选择“停止服务”。也可以直接运行：
 
 ```powershell
-.\windows-stop.cmd
+.\windows-launcher.ps1 -Action Stop
 ```
 
 也可以直接使用 Docker Compose：
@@ -245,16 +239,10 @@ docker compose -f .\compose.easyconnect.yml --profile vpn down
 
 ## 清除全部隐私数据并恢复到刚克隆状态
 
-转让电脑、停止使用本项目，或需要模拟刚克隆后的状态时，双击：
-
-```text
-windows-clear-cache.cmd
-```
-
-也可以在 PowerShell 中运行：
+转让电脑、停止使用本项目，或需要模拟刚克隆后的状态时，打开 `windows-launcher.cmd`，选择“清除全部隐私数据并重置”。也可以直接运行：
 
 ```powershell
-.\windows-clear-cache.cmd
+.\windows-launcher.ps1 -Action Erase
 ```
 
 脚本会先显示清理范围，并要求输入 `ERASE`（不区分大小写）。确认后将：
@@ -273,19 +261,31 @@ windows-clear-cache.cmd
 - Docker Desktop 本身；
 - 其他项目的容器、网络、镜像和数据。
 
-清理后工作目录与刚克隆时一致。再次运行 `windows-start.cmd`，需要重新输入正方账号、密码和 ShowDoc Token，并重新完成 EasyConnect 短信验证及正方图片验证码。由于成绩基线已删除，第一次成功查询会再次推送全部成绩。
+清理后工作目录与刚克隆时一致。再次运行 `windows-launcher.cmd`，需要重新输入正方账号、密码和 ShowDoc Token，并重新完成 EasyConnect 短信验证及正方图片验证码。由于成绩基线已删除，第一次成功查询会再次推送全部成绩。
 
 为了确保容器、网络和镜像也被删除，清理时应保持 Docker Desktop 运行。如果 Docker 不可用，脚本仍会优先删除本地隐私文件，但会提示清理尚未完整；启动 Docker Desktop 后再次运行即可完成剩余清理。
 
 自动化测试环境可以显式跳过人工确认：
 
 ```powershell
-.\windows-clear-cache.cmd -Force
+.\windows-launcher.ps1 -Action Erase -Force
 ```
 
 `-Force` 会跳过不可撤销操作的人工确认，只应在明确需要隐私擦除的自动化环境使用。
 
-## 日常检查
+## 日志与日常检查
+
+统一启动器提供两种日志查询：
+
+- “查看最近日志”：显示所选服务最近 120 行并返回菜单；
+- “实时跟踪日志”：持续显示新增日志，按 `Ctrl+C` 停止。
+
+日志可以选择成绩检查服务、校园 VPN 或两个服务。也可以直接运行：
+
+```powershell
+.\windows-launcher.ps1 -Action Logs
+.\windows-launcher.ps1 -Action FollowLogs
+```
 
 查看容器状态：
 
@@ -382,19 +382,17 @@ REQUEST_TIMEOUT_SECONDS=20
 
 | 脚本 | 用途 |
 | --- | --- |
-| `windows-start.cmd` / `.ps1` | 一键启动：环境检查、配置、网络选择、登录、后台服务 |
-| `windows-stop.cmd` / `.ps1` | 停止全部项目容器 |
+| `windows-launcher.cmd` / `.ps1` | 统一启动器：启动、停止、最近日志、实时日志、隐私清理 |
 | `windows-setup.ps1` | 单独配置或更新账号与推送凭证 |
-| `windows-clear-cache.cmd` / `.ps1` | 清除全部隐私数据，恢复刚克隆状态 |
 | `windows-ui.ps1` | 内部工具：进度条、Docker 包装器、中文错误翻译 |
 
-所有 `.cmd` 文件都是对应 `.ps1` 脚本的便捷入口（设置 UTF-8 编码后调用 PowerShell）。
+`windows-launcher.cmd` 是普通用户唯一需要双击的入口；`windows-launcher.ps1` 的 `-Action` 参数用于命令行和自动化调用。
 
 ## 常见问题
 
 ### Docker Desktop 没有启动
 
-本项目不会自动安装或启动 Docker Desktop。请先按照[官方 Windows 安装文档](https://docs.docker.com/desktop/setup/install/windows-install/)自行安装，然后启动 Docker Desktop，等待状态变为 Running，再重新运行 `windows-start.cmd`。
+本项目不会自动安装或启动 Docker Desktop。请先按照[官方 Windows 安装文档](https://docs.docker.com/desktop/setup/install/windows-install/)自行安装，然后启动 Docker Desktop，等待状态变为 Running，再重新运行 `windows-launcher.cmd`。
 
 ### `docker` 命令不存在
 
@@ -402,7 +400,7 @@ REQUEST_TIMEOUT_SECONDS=20
 
 ### Docker 当前是 Windows Containers
 
-执行 `docker info --format '{{.OSType}}'` 检查。如果结果为 `windows`，请通过 Docker Desktop 菜单切换到 Linux Containers；结果为 `linux` 后再运行 `windows-start.cmd`。
+执行 `docker info --format '{{.OSType}}'` 检查。如果结果为 `windows`，请通过 Docker Desktop 菜单切换到 Linux Containers；结果为 `linux` 后再运行 `windows-launcher.cmd`。
 
 ### 无法下载镜像
 
@@ -410,7 +408,7 @@ REQUEST_TIMEOUT_SECONDS=20
 
 ### VPN 页面已经连接，但正方仍不可达
 
-重新运行 `windows-start.cmd`。启动器会实际请求正方页面，而不是只检查 `tun0` 是否存在；现有 VPN 可用时会直接复用，不可用时才重新打开登录页面。
+重新运行 `windows-launcher.cmd`。启动器会实际请求正方页面，而不是只检查 `tun0` 是否存在；现有 VPN 可用时会直接复用，不可用时才重新打开登录页面。
 
 ### 第二次启动仍然打开 VPN 页面
 
