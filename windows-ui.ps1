@@ -39,6 +39,66 @@ function Repair-DuplicateProcessPath {
 
 Repair-DuplicateProcessPath
 
+if (-not ("ZfConsoleSpinner" -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Threading;
+
+public static class ZfConsoleSpinner
+{
+    private static readonly object Gate = new object();
+    private static readonly string[] Frames = new[] { "|", "/", "-", "\\" };
+    private static Timer timer;
+    private static string text = "";
+    private static int frame;
+
+    private static void StopTimer()
+    {
+        Timer current = timer;
+        timer = null;
+        if (current != null) current.Dispose();
+    }
+
+    private static void Render(object state)
+    {
+        lock (Gate)
+        {
+            if (timer == null) return;
+            try
+            {
+                Console.Write(
+                    "\x1b[2K\r\x1b[38;2;171;55;47m[运行] " +
+                    Frames[frame++ % Frames.Length] + " " + text + "\x1b[0m"
+                );
+            }
+            catch { }
+        }
+    }
+
+    public static void Start(string value)
+    {
+        lock (Gate)
+        {
+            StopTimer();
+            text = value ?? "";
+            frame = 0;
+            timer = new Timer(Render, null, 0, 180);
+        }
+    }
+
+    public static void Pause()
+    {
+        lock (Gate)
+        {
+            StopTimer();
+            try { Console.Write("\x1b[2K\r"); }
+            catch { }
+        }
+    }
+}
+"@
+}
+
 try {
     $script:UiAnsiEnabled = -not [Console]::IsOutputRedirected
 }
@@ -73,7 +133,12 @@ function Write-RunningStatus([string]$Text) {
         Complete-RunningStatus
     }
     $script:UiActiveOperation = $Text
-    Write-UiColor -Text "[运行] $Text" -HexColor $script:UiRunningColor -NoNewline
+    if ($script:UiAnsiEnabled) {
+        [ZfConsoleSpinner]::Start($Text)
+    }
+    else {
+        Write-UiColor -Text "[运行] | $Text" -HexColor $script:UiRunningColor -NoNewline
+    }
 }
 
 function Write-WaitingStatus([string]$Text) {
@@ -141,6 +206,7 @@ function Write-ChineseWarning([string]$Text) {
 
 function Clear-LiveProgress([string]$Activity) {
     if ($script:UiAnsiEnabled) {
+        [ZfConsoleSpinner]::Pause()
         $escape = [char]27
         Write-Host "$escape[2K`r" -NoNewline
     }
