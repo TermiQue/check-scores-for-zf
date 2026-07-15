@@ -7,7 +7,8 @@ import sys
 from pathlib import Path
 
 from scripts.zfn_api import Client
-from .config import Config
+from .config import Config, _positive_int, _read_secret
+from .notifier import serve_showdoc_relay
 from .service import ScoreChecker
 
 
@@ -20,6 +21,7 @@ def parse_args() -> argparse.Namespace:
             "probe",
             "interactive-probe",
             "notify-test",
+            "notify-relay",
             "once",
             "run",
         ),
@@ -77,6 +79,14 @@ def main() -> int:
     try:
         if args.command == "network-probe":
             network_probe()
+            return 0
+
+        if args.command == "notify-relay":
+            serve_showdoc_relay(
+                _read_secret("PUSH_TOKEN"),
+                _positive_int("REQUEST_TIMEOUT_SECONDS", 20),
+                port=_positive_int("PUSH_RELAY_PORT", 8765),
+            )
             return 0
 
         config = Config.from_env(

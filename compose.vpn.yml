@@ -3,6 +3,9 @@ services:
     depends_on:
       easyconnect:
         condition: service_started
+      push-relay:
+        condition: service_started
     network_mode: "service:easyconnect"
     environment:
       ZF_NETWORK_MODE: "vpn"
+      PUSH_RELAY_URL: "${PUSH_RELAY_URL:-http://push-relay:8765/notify}"

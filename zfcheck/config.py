@@ -37,6 +37,7 @@ class Config:
     password: str
     push_provider: str
     push_token: str
+    push_relay_url: str | None
     data_dir: Path
     proxy: str | None
     interval_seconds: int
@@ -65,6 +66,7 @@ class Config:
             password=_read_secret("ZF_PASSWORD"),
             push_provider=provider,
             push_token=token,
+            push_relay_url=os.getenv("PUSH_RELAY_URL", "").strip() or None,
             data_dir=Path(os.getenv("DATA_DIR", "/data")),
             proxy=proxy,
             interval_seconds=_positive_int("CHECK_INTERVAL_SECONDS", 1800),

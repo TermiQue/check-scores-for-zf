@@ -38,6 +38,7 @@ docker compose -f .\compose.easyconnect.yml --profile vpn ps
 docker compose -f .\compose.easyconnect.yml logs --tail 120 checker
 docker compose -f .\compose.easyconnect.yml logs -f checker
 docker compose -f .\compose.easyconnect.yml --profile vpn logs --tail 120 easyconnect
+docker compose -f .\compose.easyconnect.yml --profile vpn logs --tail 120 push-relay
 ```
 
 <p align="center">

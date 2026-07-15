@@ -609,6 +609,7 @@ function Invoke-StartAction {
     )
     $SelectedComposeArguments = $null
     $NetworkModeLabel = $null
+    Remove-Item Env:PUSH_RELAY_URL -ErrorAction SilentlyContinue
 
     Invoke-DockerCommand -Arguments ($DirectComposeArguments + @("stop", "checker")) -Quiet
 
@@ -635,7 +636,7 @@ function Invoke-StartAction {
 
     if ($null -ne $SelectedComposeArguments) {
         Write-SuccessStatus "已选择$NetworkModeLabel，不需要启动 EasyConnect"
-        Invoke-DockerCommand -Arguments ($VpnComposeArguments + @("stop", "easyconnect")) -Quiet
+        Invoke-DockerCommand -Arguments ($VpnComposeArguments + @("stop", "easyconnect", "push-relay")) -Quiet
     }
     else {
         $EasyConnectContainer = (Get-DockerCommandOutput -Arguments ($VpnComposeArguments + @("ps", "-q", "easyconnect")) | Select-Object -First 1)
@@ -802,9 +803,40 @@ function Invoke-StartAction {
         }
     }
 
-    Show-StartupProgress 90 "启动后台成绩定时检查服务"
+    if ($NetworkModeLabel -like "*容器 VPN*") {
+        Show-StartupProgress 88 "启动独立的微信推送通道"
+        Invoke-DockerCommand -Arguments ($SelectedComposeArguments + @("up", "-d", "--no-deps", "push-relay")) `
+            -Status "启动独立的微信推送通道" -StartPercent 88 -EndPercent 92
+        if ($script:LastDockerExitCode -ne 0) { throw "微信推送通道启动失败。" }
+
+        $relayContainer = Get-DockerCommandOutput -Arguments ($SelectedComposeArguments + @("ps", "-q", "push-relay")) |
+            Select-Object -First 1
+        $vpnContainer = Get-DockerCommandOutput -Arguments ($SelectedComposeArguments + @("ps", "-q", "easyconnect")) |
+            Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($relayContainer) -or [string]::IsNullOrWhiteSpace($vpnContainer)) {
+            throw "无法确定微信推送通道或 EasyConnect 容器。"
+        }
+        $relayAddress = Get-DockerCommandOutput -Arguments @(
+            "inspect", "--format",
+            "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+            $relayContainer
+        ) | Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($relayAddress)) {
+            throw "无法取得微信推送通道的 Docker 内部地址。"
+        }
+        Invoke-DockerCommand -Arguments @(
+            "exec", $vpnContainer, "ip", "route", "replace",
+            "$relayAddress/32", "dev", "eth0"
+        ) -Quiet
+        if ($script:LastDockerExitCode -ne 0) {
+            throw "无法为微信推送通道建立独立的 Docker 路由。"
+        }
+        $env:PUSH_RELAY_URL = "http://${relayAddress}:8765/notify"
+    }
+
+    Show-StartupProgress 92 "启动后台成绩定时检查服务"
     Invoke-DockerCommand -Arguments ($SelectedComposeArguments + @("up", "-d", "--no-deps", "checker")) `
-        -Status "启动后台成绩检查服务" -StartPercent 90 -EndPercent 99
+        -Status "启动后台成绩检查服务" -StartPercent 92 -EndPercent 99
     if ($script:LastDockerExitCode -ne 0) { throw "后台服务启动失败。" }
 
     Invoke-DockerCommand -Arguments ($SelectedComposeArguments + @("ps")) -Quiet
@@ -1032,14 +1064,16 @@ function Invoke-LogsAction {
         if ($AskService) {
             Write-Host "[1] 成绩检查服务日志（推荐）"
             Write-Host "[2] 校园 VPN 日志"
-            Write-Host "[3] 两个服务的全部日志"
+            Write-Host "[3] 微信推送通道日志"
+            Write-Host "[4] 全部服务日志"
             Write-Host "[0] 返回主菜单"
             Write-WaitingStatus "请选择需要查看的日志"
             $logChoice = ([string](Read-Host "请输入编号")).Trim()
             switch ($logChoice) {
                 "0" { return $true }
                 "2" { $services = @("easyconnect") }
-                "3" { $services = @("checker", "easyconnect") }
+                "3" { $services = @("push-relay") }
+                "4" { $services = @("checker", "easyconnect", "push-relay") }
                 default { $services = @("checker") }
             }
         }

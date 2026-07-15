@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
-from zfcheck.notifier import ShowdocNotifier
+from zfcheck.notifier import RelayNotifier, ShowdocNotifier, build_notifier
 
 
 class ShowdocNotifierTests(unittest.TestCase):
@@ -28,6 +28,23 @@ class ShowdocNotifierTests(unittest.TestCase):
             notifier.url,
             data={"title": "连接断开", "content": "累计监测 35 分钟"},
             timeout=20,
+        )
+        response.raise_for_status.assert_called_once_with()
+
+    def test_vpn_mode_uses_internal_relay(self):
+        notifier = build_notifier(
+            "showdoc", "abc123", 20, "http://push-relay:8765/notify"
+        )
+        self.assertIsInstance(notifier, RelayNotifier)
+
+        response = Mock()
+        notifier.session.post = Mock(return_value=response)
+        notifier.send("连接断开", "累计监测 35 分钟")
+
+        notifier.session.post.assert_called_once_with(
+            "http://push-relay:8765/notify",
+            json={"title": "连接断开", "content": "累计监测 35 分钟"},
+            timeout=25,
         )
         response.raise_for_status.assert_called_once_with()
 

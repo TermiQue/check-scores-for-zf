@@ -87,6 +87,7 @@ ShowDoc 的专属地址或 Token 不写入 `.env`，而是保存在 `secrets/pus
 | `ZF_LOGIN_DEBUG=1` | 将登录诊断写入 `runtime-data/login-debug.log`；不记录明文密码 |
 | `ZF_NETWORK_MODE` | 启动器自动设置为 `direct` 或 `vpn`；手动运行 checker 时可覆盖 |
 | `ZF_PROXY` | checker 使用的 HTTP 代理；VPN 模式不应设置 |
+| `PUSH_RELAY_URL` | VPN 模式由 Compose 自动设置；使 ShowDoc 推送绕过校园 VPN |
 | `DATA_DIR` | 容器内持久化目录，默认 `/data` |
 | `ZF_CAPTCHA_INPUT_FILE` | 交互式探测使用的验证码答案文件，启动器自动设置 |
 | `ZF_CAPTCHA_INPUT_TIMEOUT_SECONDS` | 等待 Windows 验证码窗口输入的最长时间 |

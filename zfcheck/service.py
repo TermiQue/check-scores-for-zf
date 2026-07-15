@@ -21,7 +21,7 @@ from .model import (
     normalize_courses,
     snapshot_hash,
 )
-from .notifier import Notifier, build_notifier
+from .notifier import NotificationError, Notifier, build_notifier
 from .state import StateStore
 
 
@@ -64,7 +64,10 @@ class ScoreChecker:
         self.config = config
         self.store = StateStore(config.data_dir)
         self.notifier = notifier or build_notifier(
-            config.push_provider, config.push_token, config.request_timeout_seconds
+            config.push_provider,
+            config.push_token,
+            config.request_timeout_seconds,
+            getattr(config, "push_relay_url", None),
         )
         force_login = os.getenv("ZF_FORCE_LOGIN", "0").strip().lower() in {
             "1",
@@ -439,12 +442,19 @@ class ScoreChecker:
                     operation[1]()
                 except KeyboardInterrupt:
                     raise
+                except NotificationError as exc:
+                    LOGGER.error("微信推送失败：%s；将在下次成绩检查时重试", exc)
                 except Exception as exc:
                     LOGGER.exception("%s失败", operation[0])
                     try:
                         self._notify_failure(str(exc))
+                    except NotificationError as notify_exc:
+                        LOGGER.error(
+                            "故障通知推送失败：%s；服务仍会按计划继续检测",
+                            notify_exc,
+                        )
                     except Exception:
-                        LOGGER.exception("发送失败告警失败")
+                        LOGGER.exception("发送故障通知时发生内部错误")
 
                 now = time.monotonic()
                 if operation[0] == "成绩检查":

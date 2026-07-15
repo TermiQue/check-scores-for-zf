@@ -55,6 +55,22 @@ services:
     tmpfs:
       - /tmp
 
+  push-relay:
+    profiles: ["vpn"]
+    image: zf-check-scores:windows
+    command: ["notify-relay"]
+    environment:
+      PUSH_TOKEN_FILE: /run/secrets/push_token
+      REQUEST_TIMEOUT_SECONDS: "${REQUEST_TIMEOUT_SECONDS:-20}"
+      PUSH_RELAY_PORT: "8765"
+      TZ: Asia/Shanghai
+    secrets:
+      - push_token
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp
+
 secrets:
   zf_username:
     file: ./secrets/zf_username.txt
