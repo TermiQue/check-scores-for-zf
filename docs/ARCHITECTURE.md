@@ -128,13 +128,13 @@ SNAPSHOT_FIELDS = (
 2. 首次运行时调用 `windows-setup.ps1` 收集账号和推送凭证；
 3. 构建 checker 镜像；
 4. 按决策树选择网络模式并验证正方可达性；
-5. 需要时启动 EasyConnect 并引导用户完成短信验证；
+5. 需要时启动 EasyConnect，先显示登录注意事项，再打开 noVNC；用户完成短信验证后自动轮询正方连通性，无需二次确认；
 6. 使用 `interactive-probe` 命令验证正方登录，同时通过验证码文件 (`captcha-answer.txt`) 与 WinForms 弹窗交互；
 7. 以选定的 Compose 参数启动 checker 后台服务。
 
 停止和隐私清理复用同一套 Docker 包装与中文进度组件；日志操作直接读取 Compose 服务日志，可选择 checker、EasyConnect 或两者。
 
-进度显示通过 `windows-ui.ps1` 中的 `Invoke-DockerWithProgress` 函数实现，该函数包装 Docker CLI 调用，提供动态进度条、耗时统计和友好的中文错误翻译。Docker 正常输出被收纳，仅在失败时显示最后 12 行诊断信息。
+状态显示通过 `windows-ui.ps1` 统一实现。过程状态只分为“运行状态”和“等待输入”，成功后显示“运行成功”；Docker CLI 由 `Invoke-DockerWithProgress` 包装，以单行动态进度条显示百分比和耗时。ANSI 真彩色终端使用项目规定的四组十六进制颜色，重定向输出时自动退回无颜色文本。Docker 正常输出被收纳，仅在失败时显示最后 12 行诊断信息。
 
 ## 登录状态
 

@@ -8,7 +8,8 @@ $RuntimeDir = Join-Path $Root "runtime-data"
 . (Join-Path $Root "windows-ui.ps1")
 
 function Read-SecretText([string]$Prompt) {
-    $Secure = Read-Host $Prompt -AsSecureString
+    Write-WaitingStatus $Prompt
+    $Secure = Read-Host "请输入" -AsSecureString
     $Bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secure)
     try {
         return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($Bstr)
@@ -28,7 +29,9 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 
 New-Item -ItemType Directory -Force -Path $SecretsDir, $RuntimeDir | Out-Null
 
-$Username = Read-Host "请输入正方教务学号"
+Write-LauncherTitle "`n首次运行配置"
+Write-WaitingStatus "请输入正方教务学号"
+$Username = Read-Host "请输入"
 $Password = Read-SecretText "请输入正方教务密码"
 $PushToken = Read-SecretText "请输入 ShowDoc Push Token（获取方法见 README；也可粘贴完整推送 URL）"
 
@@ -42,7 +45,7 @@ if (-not (Test-Path $EnvFile)) {
 }
 
 Write-Host "账号配置已安全写入本地 secrets 目录（不会提交到 Git）。"
-Write-Host "正在准备成绩查询运行环境，请稍候..."
+Write-RunningStatus "正在准备成绩查询运行环境"
 $buildResult = Invoke-DockerWithProgress `
     -Arguments @("compose", "-f", (Join-Path $Root "compose.easyconnect.yml"), "build", "checker") `
     -Activity "正在初始化正方成绩检查服务" -Status "构建成绩查询镜像" `
@@ -51,4 +54,4 @@ if ($buildResult.ExitCode -ne 0) {
     throw "Docker 镜像构建失败。"
 }
 
-Write-Host "初始化完成，启动程序将继续后续步骤。" -ForegroundColor Green
+Write-SuccessStatus "初始化完成，启动程序将继续后续步骤"

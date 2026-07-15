@@ -16,27 +16,67 @@ $ProbeSuccessFile = Join-Path $Root "runtime-data\interactive-probe-success"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+function Show-TopMostMessageBox {
+    param(
+        [string]$Text,
+        [string]$Title,
+        [System.Windows.Forms.MessageBoxButtons]$Buttons,
+        [System.Windows.Forms.MessageBoxIcon]$Icon
+    )
+
+    $owner = [System.Windows.Forms.Form]::new()
+    $owner.ShowInTaskbar = $false
+    $owner.TopMost = $true
+    $owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+    $owner.Size = [System.Drawing.Size]::new(1, 1)
+    $owner.Opacity = 0
+    try {
+        $owner.Show()
+        $owner.Activate()
+        return [System.Windows.Forms.MessageBox]::Show(
+            $owner, $Text, $Title, $Buttons, $Icon
+        )
+    }
+    finally {
+        $owner.Close()
+        $owner.Dispose()
+    }
+}
+
 function Show-Info([string]$Text, [string]$Title = "成绩检查服务") {
-    [System.Windows.Forms.MessageBox]::Show(
-        $Text,
-        $Title,
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]::Information
-    ) | Out-Null
+    Show-TopMostMessageBox -Text $Text -Title $Title `
+        -Buttons ([System.Windows.Forms.MessageBoxButtons]::OK) `
+        -Icon ([System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
 }
 
 function Show-ErrorMessage([string]$Text) {
-    [System.Windows.Forms.MessageBox]::Show(
-        $Text,
-        "启动失败",
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]::Error
-    ) | Out-Null
+    Show-TopMostMessageBox -Text $Text -Title "启动失败" `
+        -Buttons ([System.Windows.Forms.MessageBoxButtons]::OK) `
+        -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+}
+
+function Confirm-VpnLoginInstructions {
+    $text = @"
+接下来将打开本机专用的 EasyConnect 登录页面。
+
+请按以下顺序操作：
+1. 在 EasyConnect 中登录 https://newvpn.cumt.edu.cn；
+2. 完成手机短信验证；
+3. 等待页面明确显示 VPN 已连接。
+
+连接成功后无需寻找或点击其他确认框，也不要关闭启动器。
+启动器会自动定期检测连接，并在成功后继续运行。
+
+点击【确定】后再打开登录页面；点击【取消】可终止启动。
+"@
+    $result = Show-TopMostMessageBox -Text $text.Trim() -Title "校园 VPN 登录注意事项" `
+        -Buttons ([System.Windows.Forms.MessageBoxButtons]::OKCancel) `
+        -Icon ([System.Windows.Forms.MessageBoxIcon]::Information)
+    return $result -eq [System.Windows.Forms.DialogResult]::OK
 }
 
 function Show-StartupProgress([int]$Percent, [string]$Status) {
-    $safePercent = [Math]::Max(0, [Math]::Min(100, $Percent))
-    Write-Host ("[阶段 {0,3}%] {1}" -f $safePercent, $Status) -ForegroundColor Cyan
+    Write-RunningStatus $Status
 }
 
 function Complete-StartupProgress {
@@ -223,7 +263,8 @@ function Invoke-StartAction {
     $OriginalLocation = Get-Location
     Set-Location $Root
     try {
-    Write-Host "`n=== 正方成绩检查服务：智能启动 ===" -ForegroundColor Cyan
+    Clear-Host
+    Write-LauncherTitle "`n正方成绩检查服务 · 智能启动"
     Show-StartupProgress 5 "检查 Docker Desktop 与项目运行环境"
 
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
@@ -236,7 +277,7 @@ function Invoke-StartAction {
     Show-StartupProgress 12 "运行环境检查通过"
     if (-not (Test-Path ".\secrets\zf_username.txt")) {
         Show-StartupProgress 18 "首次运行：配置教务账号与微信推送"
-        Write-Host "检测到首次运行，请按照提示完成账号和推送配置。" -ForegroundColor Yellow
+        Write-WaitingStatus "首次运行，请完成教务账号与微信推送配置"
         & ".\windows-setup.ps1"
         if ($LASTEXITCODE -ne 0) { throw "初始化失败。" }
     }
@@ -267,9 +308,8 @@ function Invoke-StartAction {
 
     $ZhengfangLoginUrl = Get-ZhengfangLoginUrl
     Show-StartupProgress 38 "检测 Windows 与 Docker 的教务网络"
-    Write-Host "正在检测 Windows 宿主机能否访问正方教务..."
     if (Test-WindowsZhengfangAccess $ZhengfangLoginUrl) {
-        Write-Host "宿主机已经可以访问正方，优先尝试 Docker 直连。" -ForegroundColor Green
+        Write-Host "宿主机可访问正方教务，正在选择 Docker 直连方式。"
         if (Test-DockerZhengfangAccess $DirectComposeArguments) {
             $SelectedComposeArguments = $DirectComposeArguments
             $NetworkModeLabel = "宿主机直连"
@@ -283,21 +323,21 @@ function Invoke-StartAction {
         }
     }
     else {
-        Write-Host "宿主机当前无法直接访问正方，将检查容器 VPN。"
+        Write-Host "宿主机当前无法直连正方教务，正在检查隔离的容器 VPN。"
     }
 
     if ($null -ne $SelectedComposeArguments) {
-        Write-Host "已选择$NetworkModeLabel，不启动 EasyConnect 容器。" -ForegroundColor Green
+        Write-Host "已选择$NetworkModeLabel，不需要启动 EasyConnect。"
         Invoke-DockerCommand -Arguments ($VpnComposeArguments + @("stop", "easyconnect")) -Quiet
     }
     else {
         $EasyConnectContainer = (Get-DockerCommandOutput -Arguments ($VpnComposeArguments + @("ps", "-q", "easyconnect")) | Select-Object -First 1)
         if (-not [string]::IsNullOrWhiteSpace($EasyConnectContainer)) {
-            Write-Host "检测到 EasyConnect 容器正在运行，正在验证现有 VPN 会话..."
+            Show-StartupProgress 44 "验证现有容器 VPN 会话"
             if (Test-DockerZhengfangAccess $VpnComposeArguments) {
                 $SelectedComposeArguments = $VpnComposeArguments
                 $NetworkModeLabel = "已连接的容器 VPN"
-                Write-Host "现有容器 VPN 可用，将直接复用，不打开登录页面。" -ForegroundColor Green
+                Write-Host "现有容器 VPN 可用，将直接复用且不打开登录页面。"
             }
         }
 
@@ -305,27 +345,31 @@ function Invoke-StartAction {
             if (Get-Process -Name EasyConnect -ErrorAction SilentlyContinue) {
                 Write-ChineseWarning "检测到 Windows 原生 EasyConnect，但它当前未能为 Docker 提供正方连接；将使用隔离的容器 VPN。"
             }
-            Write-Host "容器 VPN 尚未连接，正在启动 EasyConnect..."
             Invoke-DockerCommand -Arguments ($VpnComposeArguments + @("up", "-d", "easyconnect")) `
                 -Status "启动隔离的校园 VPN 容器" -StartPercent 42 -EndPercent 52
             if ($script:LastDockerExitCode -ne 0) { throw "EasyConnect 容器启动失败。" }
 
             $VncPassword = Get-ProjectSetting "EC_VNC_PASSWORD" "zfcheck"
             $EncodedPassword = [Uri]::EscapeDataString($VncPassword)
-            Start-Process "http://127.0.0.1:18080/vnc.html?autoconnect=true&resize=scale&password=$EncodedPassword"
-            $choice = [System.Windows.Forms.MessageBox]::Show(
-                "请在刚打开的 EasyConnect 页面中登录 https://newvpn.cumt.edu.cn，并完成短信验证。`n`n显示 VPN 已连接后，点击【确定】继续。",
-                "连接校园 VPN",
-                [System.Windows.Forms.MessageBoxButtons]::OKCancel,
-                [System.Windows.Forms.MessageBoxIcon]::Information
-            )
-            if ($choice -ne [System.Windows.Forms.DialogResult]::OK) {
+            if (-not (Confirm-VpnLoginInstructions)) {
                 throw "用户取消了 VPN 登录。"
             }
-
-            if (-not (Test-DockerZhengfangAccess $VpnComposeArguments)) {
-                throw "容器 VPN 仍无法访问正方教务。请确认 EasyConnect 页面显示已连接。"
+            Start-Process "http://127.0.0.1:18080/vnc.html?autoconnect=true&resize=scale&password=$EncodedPassword"
+            Write-WaitingStatus "请在浏览器完成 VPN 登录和短信验证；连接成功后将自动继续"
+            Write-Host "无需返回寻找确认按钮。最长等待 10 分钟，按 Ctrl+C 可以取消。"
+            $vpnDeadline = [DateTime]::UtcNow.AddMinutes(10)
+            $vpnConnected = $false
+            while ([DateTime]::UtcNow -lt $vpnDeadline) {
+                Start-Sleep -Seconds 5
+                if (Test-DockerZhengfangAccess $VpnComposeArguments) {
+                    $vpnConnected = $true
+                    break
+                }
             }
+            if (-not $vpnConnected) {
+                throw "等待容器 VPN 连接超时。请确认 EasyConnect 页面已显示连接成功，然后重新启动。"
+            }
+            Show-StartupProgress 52 "已自动识别校园 VPN 连接"
             $SelectedComposeArguments = $VpnComposeArguments
             $NetworkModeLabel = "新连接的容器 VPN"
         }
@@ -333,7 +377,6 @@ function Invoke-StartAction {
 
     Show-StartupProgress 52 "网络通道准备完成：$NetworkModeLabel"
     Show-StartupProgress 62 "验证$NetworkModeLabel"
-    Write-Host "正在通过$NetworkModeLabel验证正方教务连接..."
     Invoke-DockerCommand -Arguments ($SelectedComposeArguments + @("run", "--rm", "--no-deps", "checker", "network-probe")) `
         -Status "验证教务系统网络连接" -StartPercent 62 -EndPercent 74
     if ($script:LastDockerExitCode -ne 0) {
@@ -341,7 +384,7 @@ function Invoke-StartAction {
     }
 
     Show-StartupProgress 76 "验证正方教务账号登录"
-    Write-Host "正在验证正方教务登录；如需验证码，将自动弹出输入窗口..."
+    Write-Host "如教务系统要求图片验证码，将自动显示输入窗口。"
     $arguments = $SelectedComposeArguments + @(
         "run", "--rm", "--no-deps", "-T",
         "-e", "ZF_CAPTCHA_INPUT_FILE=/data/captcha-answer.txt",
@@ -366,14 +409,15 @@ function Invoke-StartAction {
             $captchaState.LastHash = $hash
             $captchaState.DialogOpen = $true
             try {
-                Write-Host "[验证码] 检测到新的验证码图片，正在打开输入窗口。" -ForegroundColor Yellow
+                Clear-LiveProgress "验证码输入"
+                Write-WaitingStatus "请在弹出的窗口中输入正方教务验证码"
                 $answer = Show-CaptchaDialog $CaptchaFile
                 if ([string]::IsNullOrWhiteSpace($answer)) {
                     Write-Utf8NoBom $AnswerFile "__CANCEL__"
                 }
                 else {
                     Write-Utf8NoBom $AnswerFile $answer
-                    Write-Host "[验证码] 已提交本次输入，正在等待教务系统验证。" -ForegroundColor Green
+                    Write-RunningStatus "验证码已提交，正在等待教务系统验证"
                 }
             }
             finally {
@@ -406,15 +450,14 @@ function Invoke-StartAction {
     if ($script:LastDockerExitCode -ne 0) { throw "后台服务启动失败。" }
 
     Invoke-DockerCommand -Arguments ($SelectedComposeArguments + @("ps")) -Quiet
-    Show-StartupProgress 100 "启动完成"
     Complete-StartupProgress
-    Write-Host "`n启动完成，网络模式：$NetworkModeLabel。" -ForegroundColor Green
+    Write-SuccessStatus "启动完成，网络模式：$NetworkModeLabel"
         Show-Info "启动完成。`n`n网络模式：$NetworkModeLabel。`n服务将在后台检查成绩；首次运行会推送全部成绩，之后无变化时保持静默。`n`nDocker Desktop 重启后，请再次双击 windows-launcher.cmd 手动启动。"
         $actionSucceeded = $true
     }
     catch {
         Complete-StartupProgress
-        Write-Host "`n启动失败：$($_.Exception.Message)" -ForegroundColor Red
+        Write-FailureStatus "启动失败：$($_.Exception.Message)"
         Show-ErrorMessage $_.Exception.Message
     }
     finally {
@@ -424,7 +467,7 @@ function Invoke-StartAction {
 }
 
 function Show-ActionStage([int]$Percent, [string]$Status) {
-    Write-Host ("[阶段 {0,3}%] {1}" -f $Percent, $Status) -ForegroundColor Cyan
+    Write-RunningStatus $Status
 }
 
 function Invoke-StopAction {
@@ -432,7 +475,8 @@ function Invoke-StopAction {
     $OriginalLocation = Get-Location
     Set-Location $Root
     try {
-        Write-Host "`n=== 正方成绩检查服务：安全停止 ===" -ForegroundColor Cyan
+        Clear-Host
+        Write-LauncherTitle "`n正方成绩检查服务 · 安全停止"
         Show-ActionStage 10 "检查 Docker Desktop 与项目配置"
         if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
             throw "未找到 Docker。请先安装并启动 Docker Desktop。"
@@ -451,12 +495,11 @@ function Invoke-StopAction {
             throw "容器停止失败，请查看上方诊断信息。"
         }
 
-        Show-ActionStage 100 "服务已安全停止"
-        Write-Host "服务已停止；本地账号、登录会话和成绩基线均已保留。" -ForegroundColor Green
+        Write-SuccessStatus "服务已停止；账号、登录会话和成绩基线均已保留"
         $actionSucceeded = $true
     }
     catch {
-        Write-Host "停止失败：$($_.Exception.Message)" -ForegroundColor Red
+        Write-FailureStatus "停止失败：$($_.Exception.Message)"
     }
     finally {
         Set-Location $OriginalLocation
@@ -507,21 +550,22 @@ function Invoke-EraseAction([switch]$SkipConfirmation) {
     $OriginalLocation = Get-Location
     Set-Location $Root
     try {
-        Write-Host "`n=== 隐私数据清除与项目重置 ===" -ForegroundColor Cyan
-        Show-ActionStage 0 "等待用户确认清理范围"
+        Clear-Host
+        Write-LauncherTitle "`n正方成绩检查服务 · 隐私清除"
+        Write-WaitingStatus "请阅读并确认隐私数据清理范围"
         Write-Host "此操作会将工作目录恢复到刚克隆后的状态，并删除："
         Write-Host "  - 正方账号、密码和 ShowDoc Push Token"
         Write-Host "  - 正方登录会话、成绩基线、验证码、日志和故障状态"
         Write-Host "  - EasyConnect 登录配置、短信验证会话和 VPN 缓存"
         Write-Host "  - 本地 .env 配置、Python/测试缓存"
         Write-Host "  - 本项目的 Docker 容器、网络和服务镜像"
-        Write-Host "`n不会删除：Git 仓库、项目源代码、Docker Desktop 或其他项目的数据。" -ForegroundColor Green
+        Write-Host "`n不会删除：Git 仓库、项目源代码、Docker Desktop 或其他项目的数据。"
         Write-ChineseWarning "该操作不可撤销。再次启动时需要重新输入全部凭据并完成所有验证。"
 
         if (-not $SkipConfirmation) {
             $confirmation = ([string](Read-Host "确认永久清除请输入 ERASE（不区分大小写）")).Trim()
             if ($confirmation -ne "ERASE") {
-                Write-Host "已取消，未删除任何数据。" -ForegroundColor Yellow
+                Write-WaitingStatus "已取消，未删除任何数据"
                 return $true
             }
         }
@@ -594,12 +638,11 @@ function Invoke-EraseAction([switch]$SkipConfirmation) {
             return $false
         }
 
-        Show-ActionStage 100 "隐私数据清理完成"
-        Write-Host "隐私数据已全部清除，项目已恢复到刚克隆后的状态。" -ForegroundColor Green
+        Write-SuccessStatus "隐私数据已全部清除，项目已恢复到刚克隆后的状态"
         $actionSucceeded = $true
     }
     catch {
-        Write-Host "清理失败：$($_.Exception.Message)" -ForegroundColor Red
+        Write-FailureStatus "清理失败：$($_.Exception.Message)"
     }
     finally {
         Set-Location $OriginalLocation
@@ -616,7 +659,8 @@ function Invoke-LogsAction {
     $OriginalLocation = Get-Location
     Set-Location $Root
     try {
-        Write-Host "`n=== 运行日志查询 ===" -ForegroundColor Cyan
+        Clear-Host
+        Write-LauncherTitle "`n正方成绩检查服务 · 运行日志"
         if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
             throw "未找到 Docker。请先安装并启动 Docker Desktop。"
         }
@@ -631,7 +675,8 @@ function Invoke-LogsAction {
             Write-Host "[2] 校园 VPN 日志"
             Write-Host "[3] 两个服务的全部日志"
             Write-Host "[0] 返回主菜单"
-            $logChoice = ([string](Read-Host "请选择日志类型")).Trim()
+            Write-WaitingStatus "请选择需要查看的日志"
+            $logChoice = ([string](Read-Host "请输入编号")).Trim()
             switch ($logChoice) {
                 "0" { return $true }
                 "2" { $services = @("easyconnect") }
@@ -641,9 +686,9 @@ function Invoke-LogsAction {
         }
 
         $modeText = if ($Follow) { "实时日志" } else { "最近 120 行日志" }
-        Write-Host "正在显示$modeText。" -ForegroundColor Green
+        Write-RunningStatus "正在显示$modeText"
         if ($Follow) {
-            Write-Host "按 Ctrl+C 可停止跟踪并返回启动器。" -ForegroundColor Yellow
+            Write-WaitingStatus "按 Ctrl+C 可停止跟踪并返回启动器"
         }
         $arguments = @("compose", "-f", $ComposeFile, "--profile", "vpn", "logs", "--no-color", "--tail", "120")
         if ($Follow) { $arguments += "--follow" }
@@ -668,7 +713,7 @@ function Invoke-LogsAction {
         return $true
     }
     catch {
-        Write-Host "日志查询失败：$($_.Exception.Message)" -ForegroundColor Red
+        Write-FailureStatus "日志查询失败：$($_.Exception.Message)"
         return $false
     }
     finally {
@@ -684,9 +729,9 @@ function Wait-ForMenuReturn {
 function Show-LauncherMenu {
     while ($true) {
         Clear-Host
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "       正方成绩检查服务启动器" -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
+        Write-LauncherTitle "========================================"
+        Write-LauncherTitle "       正方成绩检查服务启动器"
+        Write-LauncherTitle "========================================"
         Write-Host "[1] 启动或恢复服务"
         Write-Host "[2] 停止服务"
         Write-Host "[3] 查看最近日志"
@@ -694,7 +739,8 @@ function Show-LauncherMenu {
         Write-Host "[5] 清除全部隐私数据并重置"
         Write-Host "[0] 退出"
         Write-Host ""
-        $choice = ([string](Read-Host "请选择操作")).Trim()
+        Write-WaitingStatus "请选择需要执行的操作"
+        $choice = ([string](Read-Host "请输入编号")).Trim()
         switch ($choice) {
             "1" { $null = Invoke-StartAction; Wait-ForMenuReturn }
             "2" { $null = Invoke-StopAction; Wait-ForMenuReturn }
@@ -703,7 +749,7 @@ function Show-LauncherMenu {
             "5" { $null = Invoke-EraseAction; Wait-ForMenuReturn }
             "0" { return }
             default {
-                Write-Host "无效选项，请输入 0 到 5。" -ForegroundColor Yellow
+                Write-WaitingStatus "无效选项，请输入 0 到 5"
                 Start-Sleep -Seconds 1
             }
         }
