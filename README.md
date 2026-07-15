@@ -1,206 +1,103 @@
 # 正方教务成绩检查与微信推送
 
-在 Windows 11 上用 Docker 定时查询正方教务系统成绩，并通过 ShowDoc Push 推送到微信。
+在 Windows 11 上通过 Docker 定时检查正方教务成绩；校外访问时使用隔离的 EasyConnect 容器连接校园 VPN，并通过 ShowDoc Push 将结果发送到微信。
 
-本分支面向中国矿业大学当前网络环境。启动器会先检测 Windows 宿主机和 Docker 是否已经能访问教务系统：能访问时 checker 直接联网，不启动 EasyConnect；不能访问时才启动隔离的 EasyConnect 容器。VPN 已连接时会直接复用现有会话，不重复打开登录页面。
+![从准备环境到收到成绩推送的五步流程](docs/images/quick-start.svg)
 
-## 当前状态
+## 项目背景
 
-- 已在 Windows 11、Docker Desktop Linux Containers 环境完成端到端验证。
-- EasyConnect 容器可以访问 `jwxt.cumt.edu.cn`。
-- 正方图片验证码和矿大明文密码兼容模式已验证。
-- 登录 Cookie、成绩基线和故障状态可持久化。
-- 默认每 30 分钟检查成绩，每 5 分钟保持教务会话活跃；使用容器 VPN 时同时保持 VPN 活跃。
-- 第一次成功查询会推送当前全部成绩；以后仅在出现新增、更新或移除时推送。
-- 有变化时推送按提交时间从新到旧排列的完整成绩单，并标注“新增”或“更新”；无变化时保持静默。
-- Docker Desktop 重启后不会自动启动服务，由用户手动运行启动入口。
+[NianBroken/ZFCheckScores](https://github.com/NianBroken/ZFCheckScores) 提供了基于 GitHub Actions 的正方教务成绩查询托管方案，但中国矿业大学教务系统需要校园内网，校外访问还需要 EasyConnect 和手机短信验证，无法直接放在 GitHub Actions 中长期运行。
 
-## 架构
+本项目将成绩检查器和 EasyConnect 分别放入 Docker 容器，并提供一个面向 Windows 11 的中文启动器。启动器会先实际检测 Windows 和 Docker 是否已经能够访问教务系统：可以直连时不启动 VPN；只有无法直连且现有容器 VPN 不可用时，才引导用户完成 EasyConnect 登录。这样既不需要额外虚拟机，也不会修改 Windows 路由或干扰 Clash 等宿主机网络工具。
 
-```text
-Windows/Docker can reach Zhengfang → checker direct ────────> Zhengfang
-otherwise                        → checker → EasyConnect VPN → Zhengfang
-checker ─────────────────────────────────────────────────────> ShowDoc Push
-```
+## 功能
 
-启动器根据实际连通性选择网络模式，通过 Docker Compose 文件叠加实现：
+- **智能选择网络**：自动选择 Docker Bridge、Docker Desktop Host 网络或隔离的容器 VPN。
+- **复用登录状态**：保存正方 Cookie，并定期保持教务会话和 VPN 活跃，日常检查不需要反复输入验证码。
+- **微信成绩推送**：第一次成功查询推送全部成绩；以后无变化时静默，有变化时推送按时间从新到旧排列的完整成绩单。
+- **标记成绩变化**：新增课程标记“新增”，已有课程成绩或字段变化标记“更新”。
+- **断联告警**：区分 VPN、正方系统和登录会话故障，通知中显示累计监测时长和恢复方法。
+- **统一 Windows 启动器**：一个菜单完成启动、停止、日志查询和隐私数据清除。
+- **轻量交互**：VPN 登录前先显示操作说明，连接成功后自动继续；正方验证码直接通过置顶小窗口输入。
+- **隐私隔离**：账号、Token、Cookie、成绩基线和 VPN 会话均保存在被 Git 忽略的本地目录中。
 
-| 模式 | Compose 文件 | checker 网络 |
-| --- | --- | --- |
-| 宿主机直连 | `compose.easyconnect.yml` | 默认 Docker bridge |
-| Host 网络直连 | `compose.easyconnect.yml` + `compose.host.yml` | Docker Desktop Host 网络 |
-| 容器 VPN | `compose.easyconnect.yml` + `compose.vpn.yml` | `service:easyconnect` 共享网络命名空间 |
-
-Windows 宿主机可达时，启动器只尝试普通 Docker 直连和 Docker Desktop Host 网络，不会启动容器 VPN；如果 Docker 无法复用宿主机网络，会提示用户启用 Host networking。只有宿主机不可达时，才检查现有容器 VPN 并在必要时新建连接。VPN 模式下只有 EasyConnect 容器拥有 `/dev/net/tun` 和 `NET_ADMIN`。checker 以非 root 用户运行、根文件系统只读，也不会修改 Windows 路由。
-
-## 项目结构
-
-```text
-check-scores-for-zf/
-├── zfcheck/                  # Python 成绩检查服务
-│   ├── __init__.py
-│   ├── __main__.py           # CLI 入口（run / probe / once / notify-test）
-│   ├── config.py             # 环境变量配置读取
-│   ├── model.py              # 成绩快照、比对与格式化
-│   ├── notifier.py           # ShowDoc Push / stdout 通知
-│   ├── service.py            # 成绩检查、登录、心跳与故障通知
-│   └── state.py              # SQLite 状态持久化（Cookie、成绩基线）
-├── scripts/
-│   └── zfn_api.py            # 正方教务系统 API 客户端
-├── tests/
-│   ├── test_model.py
-│   ├── test_notifier.py
-│   ├── test_service.py
-│   └── test_zfn_api.py
-├── compose.easyconnect.yml   # 基础 Compose（checker + easyconnect profile）
-├── compose.host.yml          # 叠加：checker 使用 Host 网络
-├── compose.vpn.yml           # 叠加：checker 共享 EasyConnect 网络命名空间
-├── Dockerfile                # checker 镜像（Python 3.12-slim，非 root）
-├── windows-launcher.cmd      # 统一入口：启动、停止、日志与隐私清理
-├── windows-launcher.ps1      # 统一 Windows 编排与中文菜单
-├── windows-setup.ps1         # 首次配置账号与 ShowDoc Token
-├── windows-ui.ps1            # PowerShell WinForms 工具函数（进度条、Docker 包装器）
-├── .env.example              # 可选配置模板
-└── docs/
-    └── ARCHITECTURE.md       # 架构与实现说明
-```
+![首次推送、静默检查和成绩变化推送规则](docs/images/notification-rules.svg)
 
 ## 快速开始
 
-准备好以下内容：
+### 1. 准备运行环境
+
+需要准备：
 
 - Windows 11；
-- 用户自行下载安装并启动 Docker Desktop，使用 Linux Containers；
-- 矿大 VPN、正方教务账号和密码；
-- ShowDoc Push 的专属推送地址或 Token。
+- 中国矿业大学 VPN 账号、正方教务账号和密码；
+- 可接收通知的微信；
+- Docker Desktop（Linux Containers）。
 
-### 安装 Docker Desktop
-
-本项目不会自动下载或安装 Docker。请读者自行从 [Docker Desktop 官方下载页](https://www.docker.com/products/docker-desktop/) 下载与电脑 CPU 架构匹配的 Windows 版本，并按照 [Docker Desktop for Windows 官方安装文档](https://docs.docker.com/desktop/setup/install/windows-install/) 完成安装。
-
-推荐使用 WSL 2 后端。安装前请确认 Windows 已启用硬件虚拟化和 WSL 2；相关要求及设置方法见 [Docker Desktop WSL 2 官方文档](https://docs.docker.com/desktop/features/wsl/)。Docker Desktop 已包含 Docker Engine、Docker CLI 和 Docker Compose，不需要单独安装 Compose。
-
-安装后启动 Docker Desktop，等待状态变为 Running，并在 PowerShell 中确认输出正常：
+本项目不会自动安装 Docker。请从 [Docker Desktop 官方下载页](https://www.docker.com/products/docker-desktop/) 自行下载安装，并按照 [Windows 官方安装文档](https://docs.docker.com/desktop/setup/install/windows-install/) 启用 WSL 2 后端。启动 Docker Desktop 后，在 PowerShell 中运行：
 
 ```powershell
-docker version
-docker compose version
 docker info --format '{{.OSType}}'
 ```
 
-最后一条命令应输出 `linux`。如果输出 `windows`，请在 Docker Desktop 菜单中切换到 Linux Containers，再运行本项目。
+输出应为 `linux`。若为 `windows`，请在 Docker Desktop 菜单中切换到 Linux Containers。
 
-如果希望 checker 复用 Windows 原生 VPN，而普通 Docker 网络无法访问正方，请使用 Docker Desktop 4.34 或更高版本，并在 `Settings > Resources > Network` 中开启 `Enable host networking`。具体要求见 [Docker Host 网络官方文档](https://docs.docker.com/engine/network/drivers/host/#docker-desktop)。
+### 2. 获取 ShowDoc Push 地址
 
-### 获取 ShowDoc Push Token
-
-ShowDoc Push 不需要单独设置用户名和密码：
-
-1. 使用电脑打开 [ShowDoc 推送服务](https://push.showdoc.com.cn/)；
-2. 点击右上角“登录”，使用微信扫描二维码；首次使用时还需要关注公众号，已关注用户直接扫码即可；
-3. 登录后进入右上角“推送”，复制页面显示的专属推送地址；
-4. 首次运行本项目时，可以粘贴完整地址，也可以只粘贴地址最后的 Token。
-
-专属地址格式如下，其中最后一段就是 Token：
+1. 打开 [ShowDoc 推送服务](https://push.showdoc.com.cn/)；
+2. 使用微信扫码登录并关注对应公众号；
+3. 进入右上角“推送”页面；
+4. 复制专属推送地址，格式如下：
 
 ```text
 https://push.showdoc.com.cn/server/api/push/你的token
 ```
 
-推送地址和 Token 都属于私密凭证，请勿截图公开或提交到 Git。如果在 ShowDoc 中重置了推送地址，需要重新运行 `windows-setup.ps1` 更新本地凭证。更多接口说明见 [ShowDoc Push 官方文档](https://www.showdoc.com.cn/push)。
+首次配置时既可以粘贴完整地址，也可以只粘贴最后的 Token。该地址属于私密凭证，请勿截图公开或提交到 Git。
 
-在项目目录中双击统一启动器：
+### 3. 下载项目
+
+使用 Git：
+
+```powershell
+git clone https://github.com/TermiQue/check-scores-for-zf.git
+cd check-scores-for-zf
+```
+
+也可以在 GitHub 页面点击 **Code → Download ZIP**，解压后进入项目目录。
+
+### 4. 打开统一启动器
+
+双击项目根目录中的 `windows-launcher.cmd`，或在 PowerShell 中运行：
 
 ```powershell
 .\windows-launcher.cmd
 ```
 
-启动程序会自动完成环境检查、首次配置、镜像构建、网络模式选择、正方登录和后台服务启动。只有宿主机无法直连且容器 VPN 也未连接时，才会先显示 VPN 登录注意事项，并在确认后打开 EasyConnect 页面；连接成功后由启动器自动检测并继续，不需要再寻找确认弹窗。正方需要图片验证码时会直接弹出轻量输入窗口。
+选择“启动或恢复服务”。首次运行时依次输入：
 
-启动器菜单还可以停止服务、查看最近 120 行日志、实时跟踪日志，以及清除全部隐私数据。日常使用不再需要记忆多个 CMD 或 Docker 命令。
+1. 正方教务学号；
+2. 正方教务密码；
+3. ShowDoc Push 完整地址或 Token。
 
-完整的从零部署、成功标志、开机运行和故障排查见 [Windows 部署手册](WINDOWS-CONTAINER-VPN.md)。实现原理见 [架构说明](docs/ARCHITECTURE.md)。
+启动器会自动构建镜像并检测网络。任务执行时显示红色旋转状态或动态进度条，完成后原地切换成绿色“成功”。
 
-## 常用命令
+### 5. 按提示完成验证
 
-```powershell
-# 打开统一中文菜单
-.\windows-launcher.cmd
+- 如果当前网络可以访问教务系统，启动器会直接继续，不打开 EasyConnect。
+- 如果需要容器 VPN，先阅读弹出的注意事项，确认后在浏览器完成 EasyConnect 登录和短信验证；页面显示连接成功后无需寻找确认按钮，启动器会自动检测并继续。
+- 如果正方要求图片验证码，直接在置顶窗口中输入并确认。
+- 出现“启动完成”弹窗后可以关闭启动器窗口，成绩检查服务会在 Docker 后台运行。
 
-# 也可以直接执行指定操作
-.\windows-launcher.ps1 -Action Start
-.\windows-launcher.ps1 -Action Stop
-.\windows-launcher.ps1 -Action Logs
-.\windows-launcher.ps1 -Action FollowLogs
-.\windows-launcher.ps1 -Action Erase
+默认每 30 分钟检查一次成绩，每 5 分钟保持一次教务会话心跳。第一次成功查询会立即向微信推送当前全部成绩。
 
-# 仅配置或更新账号与推送凭证
-.\windows-setup.ps1
+## 进一步阅读
 
-# 查看服务状态
-docker compose -f .\compose.easyconnect.yml --profile vpn ps
-
-# 查看成绩检查日志（最近 100 行）
-docker compose -f .\compose.easyconnect.yml logs --tail 100 checker
-
-# 实时跟踪成绩检查日志
-docker compose -f .\compose.easyconnect.yml logs -f checker
-
-# 测试微信推送
-docker compose -f .\compose.easyconnect.yml run --rm checker notify-test
-
-# 单次成绩检查（不进入循环）
-docker compose -f .\compose.easyconnect.yml run --rm checker once
-
-# 验证正方教务连接
-docker compose -f .\compose.easyconnect.yml run --rm checker network-probe
-```
-
-## 可选配置
-
-复制 `.env.example` 为 `.env` 后按需修改：
-
-```dotenv
-ZF_URL=http://jwxt.cumt.edu.cn/jwglxt/
-ZF_CAPTCHA_PASSWORD_MODE=plain
-ZF_CAPTCHA_MAX_ATTEMPTS=5
-EC_VNC_PASSWORD=zfcheck
-PUSH_PROVIDER=showdoc
-CHECK_INTERVAL_SECONDS=1800
-HEARTBEAT_INTERVAL_SECONDS=300
-CHECK_JITTER_SECONDS=120
-FAILURE_ALERT_COOLDOWN_SECONDS=21600
-REQUEST_TIMEOUT_SECONDS=20
-```
-
-详细说明见 [Windows 部署手册](WINDOWS-CONTAINER-VPN.md#可选配置)。
-
-## 数据与隐私
-
-以下路径都已加入 `.gitignore`，不得提交或发送给他人：
-
-- `secrets/`：正方账号、密码和 ShowDoc Token；
-- `runtime-data/`：登录 Cookie、成绩快照和验证码；
-- `easyconnect-data/`：EasyConnect 登录配置。
-
-转让电脑、停止使用或需要从全新状态重新测试时，打开 `windows-launcher.cmd` 并选择“清除全部隐私数据并重置”。输入 `ERASE` 后，启动器会删除项目运行后产生的全部隐私数据和本地配置，包括账号密码、ShowDoc Token、`.env`、正方 Cookie、成绩基线、日志、验证码、EasyConnect 配置与 VPN 会话，同时删除本项目的容器、网络和服务镜像。Git 仓库、源代码、Docker Desktop 和其他项目的数据不会被删除。清理后再次启动需要重新输入全部凭据并完成短信及图片验证码。
-
-首次发布前建议执行：
-
-```powershell
-git status --short
-git grep -n -I -E "你的学号|你的Token|你的密码"
-```
-
-## 已知限制
-
-- 短信验证码和正方图片验证码必须由用户本人输入，项目不会绕过验证码。
-- 如果学校强制 VPN 或正方会话重新认证，重新运行 `windows-launcher.cmd` 即可。
-- 当前容器 VPN 配置针对矿大验证；其他学校需要调整 VPN 地址、正方地址及登录兼容参数。
-- 项目依赖第三方 EasyConnect 容器镜像；镜像已在 Compose 中固定到不可变摘要，升级前应重新验证。
-
-## 致谢与许可证
-
-本项目基于 [NianBroken/ZFCheckScores](https://github.com/NianBroken/ZFCheckScores) 和 [openschoolcn/zfn_api](https://github.com/openschoolcn/zfn_api) 改造。
-
-代码按仓库中的 [Apache License 2.0](LICENSE) 发布。分发修改版本时请保留原作者版权、许可证和修改说明。
+| 文档 | 内容 |
+| --- | --- |
+| [文档中心](docs/README.md) | 全部文档的分类入口 |
+| [Windows 部署与使用手册](WINDOWS-CONTAINER-VPN.md) | 完整安装、VPN 登录、验证码、故障恢复和常见问题 |
+| [配置参考](docs/CONFIGURATION.md) | `.env` 参数、启动器参数和诊断选项 |
+| [日常运维与隐私](docs/OPERATIONS.md) | 启停、日志、推送测试、数据目录和隐私清理 |
+| [技术架构](docs/ARCHITECTURE.md) | 容器、网络模式、数据模型、状态机和安全边界 |
+| [开发与测试](docs/DEVELOPMENT.md) | 项目结构、测试方式、致谢与许可证 |
