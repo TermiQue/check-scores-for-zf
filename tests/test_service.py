@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from zfcheck.service import ScoreChecker
+from zfcheck.service import CheckError, ScoreChecker
 from zfcheck.state import StateStore
 from zfcheck.model import normalize_courses
 
@@ -133,6 +133,27 @@ class InteractiveLoginTests(unittest.TestCase):
             self.assertEqual(2, checker.client.login_count)
             self.assertEqual(2, checker.client.submit_count)
             self.assertEqual("RIGHT", checker.client.submitted["kaptcha"])
+
+    def test_single_attempt_returns_immediately_to_launcher(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            checker = object.__new__(ScoreChecker)
+            checker.config = SimpleNamespace(
+                username="student",
+                password="password",
+                data_dir=Path(temp_dir),
+            )
+            checker.client = RetryCaptchaClient()
+            checker.logged_in = False
+            checker.store = SimpleNamespace(set=lambda key, value: None)
+
+            with patch("builtins.input", return_value="WRONG"), patch.dict(
+                "os.environ", {"ZF_CAPTCHA_MAX_ATTEMPTS": "1"}
+            ):
+                with self.assertRaisesRegex(CheckError, "验证码输入错误"):
+                    checker._login(interactive=True)
+
+            self.assertEqual(1, checker.client.login_count)
+            self.assertEqual(1, checker.client.submit_count)
 
 
 class NullNotifier:

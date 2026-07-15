@@ -41,6 +41,7 @@ class WindowsLauncherContractTests(unittest.TestCase):
         self.assertIn('$retryButton.Text = "重新输入验证码"', content)
         self.assertIn('$changeButton.Text = "更改账号密码"', content)
         self.assertIn('$showPassword.Text = "显示密码"', content)
+        self.assertIn('"-e", "ZF_CAPTCHA_MAX_ATTEMPTS=1"', content)
         self.assertIn('"-e", "ZF_FORCE_LOGIN=1"', content)
         self.assertIn("Write-Utf8NoBom $usernamePath $credentials.Username", content)
         self.assertIn("Write-Utf8NoBom $passwordPath $credentials.Password", content)

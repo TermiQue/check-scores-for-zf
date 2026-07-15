@@ -706,7 +706,10 @@ function Invoke-StartAction {
         $arguments = $SelectedComposeArguments + @(
             "run", "--rm", "--no-deps", "-T",
             "-e", "ZF_CAPTCHA_INPUT_FILE=/data/captcha-answer.txt",
-            "-e", "ZF_CAPTCHA_INPUT_TIMEOUT_SECONDS=300"
+            "-e", "ZF_CAPTCHA_INPUT_TIMEOUT_SECONDS=300",
+            # The launcher owns the recovery flow. A wrong captcha must return
+            # immediately so the user can inspect credentials before retrying.
+            "-e", "ZF_CAPTCHA_MAX_ATTEMPTS=1"
         )
         if ($forceFreshLogin) {
             $arguments += @("-e", "ZF_FORCE_LOGIN=1")
