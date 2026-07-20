@@ -148,6 +148,7 @@ cd check-scores-for-zf
 | --- | --- |
 | [文档中心](docs/README.md) | 全部文档的分类入口 |
 | [Windows 部署与使用手册](WINDOWS-CONTAINER-VPN.md) | 完整安装、VPN 登录、验证码、故障恢复和常见问题 |
+| [Linux 部署与启动器](docs/LINUX-DEPLOYMENT.md) | Linux 服务器首次配置、网络自动选择、VPN 登录和运维命令 |
 | [配置参考](docs/CONFIGURATION.md) | `.env` 参数、启动器参数和诊断选项 |
 | [日常运维与隐私](docs/OPERATIONS.md) | 启停、日志、推送测试、数据目录和隐私清理 |
 | [技术架构](docs/ARCHITECTURE.md) | 容器、网络模式、数据模型、状态机和安全边界 |

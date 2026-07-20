@@ -2,3 +2,4 @@
 # executable by cmd.exe, so batch launchers are stored without normalization.
 *.cmd binary
 *.ps1 text eol=crlf
+*.sh text eol=lf

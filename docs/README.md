@@ -7,6 +7,7 @@
 | 文档 | 适合场景 |
 | --- | --- |
 | [Windows 部署与使用手册](../WINDOWS-CONTAINER-VPN.md) | 从零安装、首次启动、VPN/验证码操作和常见问题 |
+| [Linux 部署与启动器](LINUX-DEPLOYMENT.md) | 在 Linux 服务器上自动选择直连或容器 VPN 并完成日常运维 |
 | [配置参考](CONFIGURATION.md) | 修改检查频率、心跳、超时、推送方式和调试选项 |
 | [日常运维与隐私](OPERATIONS.md) | 启停服务、查看日志、测试推送、故障恢复和彻底清除本地数据 |
 
